@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 public final class MugSessionCoordinator {
     public enum SessionError: Error, Equatable {
         case bluetoothUnavailable(BLEAvailability)
@@ -28,7 +29,9 @@ public final class MugSessionCoordinator {
     private let bluetooth: BluetoothManaging
     private let reducer: MugStatusReducer
     private let reconnectMaxAttempts: Int
+    private let parseWarningsLimit: Int
     private var connectionEventsTask: Task<Void, Never>?
+    private var pushEventsTask: Task<Void, Never>?
 
     private(set) public var compatibilityMode: ProtocolCompatibilityMode
     private(set) public var selectedMug: MugIdentity?
@@ -40,12 +43,14 @@ public final class MugSessionCoordinator {
         bluetooth: BluetoothManaging,
         reducer: MugStatusReducer = MugStatusReducer(),
         compatibilityMode: ProtocolCompatibilityMode = .permissive,
-        reconnectMaxAttempts: Int = 2
+        reconnectMaxAttempts: Int = 2,
+        parseWarningsLimit: Int = 50
     ) {
         self.bluetooth = bluetooth
         self.reducer = reducer
         self.compatibilityMode = compatibilityMode
         self.reconnectMaxAttempts = reconnectMaxAttempts
+        self.parseWarningsLimit = parseWarningsLimit
         self.status = MugStatus()
         self.diagnostics = MugDiagnostics()
     }
@@ -56,6 +61,7 @@ public final class MugSessionCoordinator {
 
     deinit {
         connectionEventsTask?.cancel()
+        pushEventsTask?.cancel()
     }
 
     public func startConnectionEventListening() {
@@ -64,9 +70,9 @@ public final class MugSessionCoordinator {
 
         connectionEventsTask = Task { [weak self] in
             guard let self else { return }
-            for await event in self.bluetooth.connectionEvents {
+            for await event in bluetooth.connectionEvents {
                 if Task.isCancelled { break }
-                await self.handleConnectionEvent(event)
+                await handleConnectionEvent(event)
             }
         }
     }
@@ -74,6 +80,8 @@ public final class MugSessionCoordinator {
     public func stopConnectionEventListening() {
         connectionEventsTask?.cancel()
         connectionEventsTask = nil
+        pushEventsTask?.cancel()
+        pushEventsTask = nil
         appendEvent("Stopped connection event listener")
     }
 
@@ -116,9 +124,10 @@ public final class MugSessionCoordinator {
 
     public func disconnect() async {
         stopConnectionEventListening()
-        guard let selectedMug else { return }
-        appendEvent("Manual disconnect")
-        await bluetooth.disconnect(from: selectedMug.id)
+        if let selectedMug {
+            appendEvent("Manual disconnect")
+            await bluetooth.disconnect(from: selectedMug.id)
+        }
         self.selectedMug = nil
         self.capabilityMap = nil
         status.connectionState = .disconnected
@@ -167,7 +176,19 @@ public final class MugSessionCoordinator {
     private func subscribeToNotificationsIfSupported() async throws {
         guard let selectedMug, capabilityMap?.supportsPushEvents == true else { return }
 
-        _ = try await bluetooth.subscribe(to: EmberCharacteristic.pushEvents, on: selectedMug.id)
+        let stream = try await bluetooth.subscribe(to: EmberCharacteristic.pushEvents, on: selectedMug.id)
+        pushEventsTask?.cancel()
+        pushEventsTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await _ in stream {
+                    if Task.isCancelled { break }
+                    await handlePushNotificationEvent()
+                }
+            } catch {
+                appendEvent("Push event stream failed: \(error.localizedDescription)")
+            }
+        }
         appendEvent("Subscribed to push events")
     }
 
@@ -200,16 +221,51 @@ public final class MugSessionCoordinator {
     }
 
     private func absorbWarningsFromStatus() {
-        let warnings = status.rawDiagnostics.values.sorted()
+        let warnings = status.rawDiagnostics.values.map { $0.toRecord(timestamp: status.lastUpdated) }
+        let sortedWarnings = warnings.sorted { $0.detail < $1.detail }
 
         switch compatibilityMode {
         case .strict:
-            diagnostics.parseWarnings = warnings
+            diagnostics.parseWarnings = capped(sortedWarnings)
         case .permissive:
-            diagnostics.parseWarnings = Array(Set(diagnostics.parseWarnings + warnings)).sorted()
+            let merged = dedupeWarnings(diagnostics.parseWarnings + sortedWarnings)
+            diagnostics.parseWarnings = capped(merged)
         }
     }
+
+    private func handlePushNotificationEvent() async {
+        appendEvent("Push event received")
+        do {
+            try await refresh()
+        } catch {
+            appendEvent("Push-triggered refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func dedupeWarnings(_ warnings: [ParseWarningRecord]) -> [ParseWarningRecord] {
+        var seen: Set<String> = []
+        var deduped: [ParseWarningRecord] = []
+
+        for warning in warnings.sorted(by: { $0.timestamp < $1.timestamp }) {
+            let key = [
+                warning.field,
+                warning.code.rawValue,
+                warning.detail,
+                warning.expectedLength.map(String.init) ?? "",
+                warning.actualLength.map(String.init) ?? "",
+                warning.rawValue.map(String.init) ?? ""
+            ].joined(separator: "|")
+
+            if seen.insert(key).inserted {
+                deduped.append(warning)
+            }
+        }
+
+        return deduped
+    }
+
+    private func capped(_ warnings: [ParseWarningRecord]) -> [ParseWarningRecord] {
+        guard warnings.count > parseWarningsLimit else { return warnings }
+        return Array(warnings.suffix(parseWarningsLimit))
+    }
 }
-
-
-extension MugSessionCoordinator: @unchecked Sendable {}

@@ -42,3 +42,27 @@ public enum StatusParsers {
         return .success(LiquidState(rawValue: data[0]))
     }
 }
+
+public extension ParseWarning {
+    func toRecord(timestamp: Date = Date()) -> ParseWarningRecord {
+        switch self {
+        case .invalidLength(let field, let expected, let actual):
+            return ParseWarningRecord(
+                timestamp: timestamp,
+                field: field,
+                code: .invalidLength,
+                detail: "Invalid payload length for \(field). expected=\(expected) actual=\(actual)",
+                expectedLength: expected,
+                actualLength: actual
+            )
+        case .invalidBatteryPercent(let percent):
+            return ParseWarningRecord(
+                timestamp: timestamp,
+                field: "battery",
+                code: .invalidBatteryPercent,
+                detail: "Battery percent out of range: \(percent)",
+                rawValue: percent
+            )
+        }
+    }
+}

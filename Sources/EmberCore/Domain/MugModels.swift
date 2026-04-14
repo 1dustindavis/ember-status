@@ -45,7 +45,7 @@ public struct MugStatus: Equatable, Sendable {
     public var liquidState: LiquidState?
     public var connectionState: ConnectionState
     public var lastUpdated: Date
-    public var rawDiagnostics: [String: String]
+    public var rawDiagnostics: [String: ParseWarning]
 
     public init(
         currentTempC: Double? = nil,
@@ -55,7 +55,7 @@ public struct MugStatus: Equatable, Sendable {
         liquidState: LiquidState? = nil,
         connectionState: ConnectionState = .disconnected,
         lastUpdated: Date = Date(),
-        rawDiagnostics: [String: String] = [:]
+        rawDiagnostics: [String: ParseWarning] = [:]
     ) {
         self.currentTempC = currentTempC
         self.targetTempC = targetTempC
