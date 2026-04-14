@@ -1,8 +1,13 @@
-# macOS App Shell (Planned)
+# macOS App Shell
 
-This repository currently ships `EmberCore` as a Swift package and keeps macOS UI shell work lightweight.
+This repository ships `EmberCore` plus a thin SwiftUI macOS shell in `Apps/macOS/Sources/EmberStatusmacOSApp.swift`.
 
-Planned shell responsibilities:
-- Shared workflow with iOS through `EmberCore`
-- Status display + reconnect actions
-- Diagnostics panel and copy diagnostics affordance
+Implemented shell responsibilities:
+- Shared snapshot-driven workflow via `MugSessionCoordinator.Snapshot`
+- View-model bind/unbind lifecycle for coordinator ownership
+- Event stream lifecycle hookup using coordinator listener APIs
+
+Next production hardening steps:
+- Wire CoreBluetooth transport implementation
+- Add connect/reconnect controls and device selection
+- Expand diagnostics UI and copy/export affordance

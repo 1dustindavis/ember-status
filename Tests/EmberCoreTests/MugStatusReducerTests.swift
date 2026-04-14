@@ -42,4 +42,25 @@ final class MugStatusReducerTests: XCTestCase {
         XCTAssertNotNil(next.rawDiagnostics["batteryParseWarning"])
         XCTAssertNotNil(next.rawDiagnostics["liquidStateParseWarning"])
     }
+
+    func testReducerClearsFieldWarningAfterSuccessfulParseForSameField() {
+        let reducer = MugStatusReducer()
+        let start = MugStatus(connectionState: .connected)
+
+        let withWarning = reducer.reduce(
+            status: start,
+            with: MugStatusReducer.Event(currentTempData: Data([0x11]), timestamp: Date(timeIntervalSince1970: 10))
+        )
+
+        XCTAssertNotNil(withWarning.rawDiagnostics["currentTempParseWarning"])
+
+        let recovered = reducer.reduce(
+            status: withWarning,
+            with: MugStatusReducer.Event(currentTempData: Data([0xF4, 0x09]), timestamp: Date(timeIntervalSince1970: 11))
+        )
+
+        XCTAssertEqual(recovered.currentTempC, 25.48)
+        XCTAssertNil(recovered.rawDiagnostics["currentTempParseWarning"])
+    }
+
 }

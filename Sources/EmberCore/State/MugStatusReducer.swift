@@ -33,6 +33,7 @@ public struct MugStatusReducer {
             switch StatusParsers.parseTemperatureC(from: currentTempData) {
             case .success(let value):
                 next.currentTempC = value
+                next.rawDiagnostics.removeValue(forKey: "currentTempParseWarning")
             case .failure(let warning):
                 next.rawDiagnostics["currentTempParseWarning"] = String(describing: warning)
             }
@@ -42,6 +43,7 @@ public struct MugStatusReducer {
             switch StatusParsers.parseTemperatureC(from: targetTempData) {
             case .success(let value):
                 next.targetTempC = value
+                next.rawDiagnostics.removeValue(forKey: "targetTempParseWarning")
             case .failure(let warning):
                 next.rawDiagnostics["targetTempParseWarning"] = String(describing: warning)
             }
@@ -52,6 +54,7 @@ public struct MugStatusReducer {
             case .success(let value):
                 next.batteryPercent = value.percent
                 next.isCharging = value.isCharging
+                next.rawDiagnostics.removeValue(forKey: "batteryParseWarning")
             case .failure(let warning):
                 next.rawDiagnostics["batteryParseWarning"] = String(describing: warning)
             }
@@ -61,6 +64,7 @@ public struct MugStatusReducer {
             switch StatusParsers.parseLiquidState(from: liquidStateData) {
             case .success(let value):
                 next.liquidState = value
+                next.rawDiagnostics.removeValue(forKey: "liquidStateParseWarning")
             case .failure(let warning):
                 next.rawDiagnostics["liquidStateParseWarning"] = String(describing: warning)
             }
