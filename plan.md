@@ -148,7 +148,5 @@ Settings/diagnostics:
 
 To guarantee no drift into write features:
 - Protocol layer should expose **no write API**.
-- Add lint/test guard:
-  - fail if `writeValue` is referenced in core package.
 - Code review checklist item:
   - “No characteristic writes introduced.”
