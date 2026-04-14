@@ -97,6 +97,82 @@ final class MugSessionCoordinatorIntegrationTests: XCTestCase {
 
         XCTAssertTrue(coordinator.diagnostics.connectionEvents.contains { $0.message.contains("Reconnect attempt 1") })
     }
+
+    func testCoordinatorListenerConsumesConnectionEventsStream() async throws {
+        let mock = MockBluetoothManager()
+        let mug = UUID()
+        let coordinator = MugSessionCoordinator(bluetooth: mock)
+
+        coordinator.startConnectionEventListening()
+        await mock.push(event: .connected(mug))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(coordinator.status.connectionState, .connected)
+
+        coordinator.stopConnectionEventListening()
+        await mock.push(event: .disconnected(mug, expected: true))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(coordinator.status.connectionState, .connected)
+    }
+
+    func testStrictCompatibilityReplacesWarningsAcrossRefreshCycles() async throws {
+        let mock = MockBluetoothManager()
+        let mug = UUID()
+        await mock.setDevices([BLEDevice(id: mug, name: "Strict", rssi: -42)])
+        await mock.setReads([
+            EmberCharacteristic.currentTemp: Data([0x11]),
+            EmberCharacteristic.targetTemp: Data([0x2C, 0x1E]),
+            EmberCharacteristic.battery: Data([80, 1]),
+            EmberCharacteristic.liquidState: Data([3])
+        ])
+
+        let coordinator = MugSessionCoordinator(bluetooth: mock, compatibilityMode: .strict)
+        let ranked = try await coordinator.scanAndRankDevices()
+        try await coordinator.connect(to: ranked[0])
+
+        XCTAssertTrue(coordinator.diagnostics.parseWarnings.contains { $0.contains("temperature") })
+
+        await mock.setReads([
+            EmberCharacteristic.currentTemp: Data([0xF4, 0x09]),
+            EmberCharacteristic.targetTemp: Data([0x2C, 0x1E]),
+            EmberCharacteristic.battery: Data([80, 1]),
+            EmberCharacteristic.liquidState: Data([3])
+        ])
+
+        try await coordinator.refresh(at: Date(timeIntervalSince1970: 777))
+
+        XCTAssertTrue(coordinator.diagnostics.parseWarnings.isEmpty)
+    }
+
+    func testPermissiveCompatibilityAccumulatesWarningsAcrossRefreshCycles() async throws {
+        let mock = MockBluetoothManager()
+        let mug = UUID()
+        await mock.setDevices([BLEDevice(id: mug, name: "Permissive", rssi: -50)])
+        await mock.setReads([
+            EmberCharacteristic.currentTemp: Data([0x11]),
+            EmberCharacteristic.targetTemp: Data([0x2C, 0x1E]),
+            EmberCharacteristic.battery: Data([80, 1]),
+            EmberCharacteristic.liquidState: Data([3])
+        ])
+
+        let coordinator = MugSessionCoordinator(bluetooth: mock, compatibilityMode: .permissive)
+        let ranked = try await coordinator.scanAndRankDevices()
+        try await coordinator.connect(to: ranked[0])
+
+        XCTAssertTrue(coordinator.diagnostics.parseWarnings.contains { $0.contains("temperature") })
+
+        await mock.setReads([
+            EmberCharacteristic.currentTemp: Data([0xF4, 0x09]),
+            EmberCharacteristic.targetTemp: Data([0x2C, 0x1E]),
+            EmberCharacteristic.battery: Data([80, 1]),
+            EmberCharacteristic.liquidState: Data([3])
+        ])
+
+        try await coordinator.refresh(at: Date(timeIntervalSince1970: 888))
+
+        XCTAssertTrue(coordinator.diagnostics.parseWarnings.contains { $0.contains("temperature") })
+    }
 }
 
 private extension MockBluetoothManager {

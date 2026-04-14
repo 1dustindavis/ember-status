@@ -20,11 +20,22 @@ final class ReadOnlyGuardrailTests: XCTestCase {
 
         XCTAssertFalse(swiftFiles.isEmpty)
 
+        let forbiddenSymbols = [
+            "writeValue(",
+            "setTargetTemp",
+            "CBCharacteristicWriteType",
+            "withResponse",
+            "withoutResponse",
+            "writeWithoutResponse",
+            "didWriteValueFor"
+        ]
+
         for relativeFile in swiftFiles {
             let path = URL(fileURLWithPath: emberCorePath).appendingPathComponent(relativeFile).path
             let contents = try String(contentsOfFile: path, encoding: .utf8)
-            XCTAssertFalse(contents.contains("writeValue("), "Write API found in \(relativeFile)")
-            XCTAssertFalse(contents.contains("setTargetTemp"), "Write-oriented helper found in \(relativeFile)")
+            for symbol in forbiddenSymbols {
+                XCTAssertFalse(contents.contains(symbol), "Write-oriented symbol '\(symbol)' found in \(relativeFile)")
+            }
         }
     }
 }

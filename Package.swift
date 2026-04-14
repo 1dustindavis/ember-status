@@ -4,8 +4,8 @@ import PackageDescription
 let package = Package(
     name: "EmberStatus",
     platforms: [
-        .iOS("26.0"),
-        .macOS("26.0")
+        .iOS("17.0"),
+        .macOS("14.0")
     ],
     products: [
         .library(name: "EmberCore", targets: ["EmberCore"])

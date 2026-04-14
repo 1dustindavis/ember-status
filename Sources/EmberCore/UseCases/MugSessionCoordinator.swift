@@ -28,6 +28,7 @@ public final class MugSessionCoordinator {
     private let bluetooth: BluetoothManaging
     private let reducer: MugStatusReducer
     private let reconnectMaxAttempts: Int
+    private var connectionEventsTask: Task<Void, Never>?
 
     private(set) public var compatibilityMode: ProtocolCompatibilityMode
     private(set) public var selectedMug: MugIdentity?
@@ -51,6 +52,29 @@ public final class MugSessionCoordinator {
 
     public func setCompatibilityMode(_ mode: ProtocolCompatibilityMode) {
         compatibilityMode = mode
+    }
+
+    deinit {
+        connectionEventsTask?.cancel()
+    }
+
+    public func startConnectionEventListening() {
+        connectionEventsTask?.cancel()
+        appendEvent("Started connection event listener")
+
+        connectionEventsTask = Task { [weak self] in
+            guard let self else { return }
+            for await event in self.bluetooth.connectionEvents {
+                if Task.isCancelled { break }
+                await self.handleConnectionEvent(event)
+            }
+        }
+    }
+
+    public func stopConnectionEventListening() {
+        connectionEventsTask?.cancel()
+        connectionEventsTask = nil
+        appendEvent("Stopped connection event listener")
     }
 
     @discardableResult
@@ -91,6 +115,7 @@ public final class MugSessionCoordinator {
     }
 
     public func disconnect() async {
+        stopConnectionEventListening()
         guard let selectedMug else { return }
         appendEvent("Manual disconnect")
         await bluetooth.disconnect(from: selectedMug.id)
@@ -185,3 +210,6 @@ public final class MugSessionCoordinator {
         }
     }
 }
+
+
+extension MugSessionCoordinator: @unchecked Sendable {}

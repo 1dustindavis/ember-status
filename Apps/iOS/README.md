@@ -1,9 +1,13 @@
-# iOS App Shell (Planned)
+# iOS App Shell
 
-This repository currently ships `EmberCore` as a Swift package and keeps iOS UI shell work lightweight.
+This repository ships `EmberCore` plus a thin SwiftUI iOS shell in `Apps/iOS/Sources/EmberStatusiOSApp.swift`.
 
-Planned shell responsibilities:
-- Bluetooth permission UX and state presentation
-- Device list (name + RSSI)
-- Status screen bound to `MugSessionCoordinator.Snapshot`
-- Diagnostics/debug panel
+Implemented shell responsibilities:
+- Snapshot-driven status surface backed by `MugSessionCoordinator.Snapshot`
+- View-model binding hooks for attaching/detaching a coordinator instance
+- Explicit coordinator lifecycle wiring (`startConnectionEventListening` / `stopConnectionEventListening`)
+
+Next production hardening steps:
+- Inject a real CoreBluetooth-backed `BluetoothManaging` implementation
+- Add permission UX and device-list interaction
+- Add refresh/disconnect actions and richer diagnostics presentation
