@@ -1,11 +1,11 @@
 # macOS App Shell
 
-This repository ships `EmberCore` plus a thin SwiftUI macOS shell in `Apps/macOS/Sources/EmberStatusmacOSApp.swift`.
+This repository ships `EmberCore` plus a UIKit shell for Mac Catalyst in `Apps/macOS/Sources`.
 
 Implemented shell responsibilities:
-- Shared snapshot-driven workflow via `MugSessionCoordinator.Snapshot`
-- View-model bind/unbind lifecycle for coordinator ownership
-- Event stream lifecycle hookup using coordinator listener APIs
+- Scene-based UIKit startup (`AppDelegate` + `SceneDelegate`)
+- Snapshot-driven status rendering via `MugSessionCoordinator.Snapshot`
+- Mac Catalyst toolbar integration for desktop-style sidebar behavior
 
 Next production hardening steps:
 - Wire CoreBluetooth transport implementation
