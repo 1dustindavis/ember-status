@@ -27,8 +27,8 @@
 ## 2) Technical architecture
 
 ### Repo structure (recommended)
-- `EmberStatus/` (app project/workspace)
-- `Packages/EmberCore/` (shared logic for iOS + macOS)
+- `Apps/EmberStatusApp/` (Xcode project/workspace; UIKit app target with Mac Catalyst enabled)
+- `Sources/EmberCore/` (shared logic for iOS + macOS)
   - `Bluetooth/` (CoreBluetooth abstraction)
   - `Protocol/` (UUID map + read parsers only)
   - `Domain/` (read-only state models)
@@ -41,7 +41,7 @@
 1. **Transport layer** — wraps CoreBluetooth primitives.
 2. **Protocol layer** — parse-only decoders (`Data -> typed values`).
 3. **State layer** — immutable/read-oriented `MugStatus`.
-4. **UI layer** — SwiftUI views bound to observable state.
+4. **UI layer** — UIKit view controllers bound to observable state (no SwiftUI/NIBs/Auto Layout), including Mac Catalyst support.
 
 ## 3) Read-only data model
 
@@ -86,6 +86,10 @@ Design for partial data and unknown fields to handle firmware variance gracefull
 - Unexpected disconnect: optional auto-reconnect with capped retry/backoff.
 
 ## 5) iOS and macOS specifics
+
+Minimum deployment targets:
+- iOS 26.0+
+- macOS 26.0+
 
 ### iOS
 - Configure Bluetooth usage descriptions in `Info.plist`.
