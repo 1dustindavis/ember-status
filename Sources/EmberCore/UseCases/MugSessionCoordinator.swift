@@ -29,12 +29,14 @@ public final class MugSessionCoordinator {
     private let reducer: MugStatusReducer
     private let reconnectMaxAttempts: Int
     private var connectionEventsTask: Task<Void, Never>?
+    private var notificationTask: Task<Void, Never>?
 
     private(set) public var compatibilityMode: ProtocolCompatibilityMode
     private(set) public var selectedMug: MugIdentity?
     private(set) public var status: MugStatus
     private(set) public var diagnostics: MugDiagnostics
     private(set) public var capabilityMap: MugCapabilityMap?
+    public var onSnapshotChanged: ((Snapshot) -> Void)?
 
     public init(
         bluetooth: BluetoothManaging,
@@ -56,11 +58,13 @@ public final class MugSessionCoordinator {
 
     deinit {
         connectionEventsTask?.cancel()
+        notificationTask?.cancel()
     }
 
     public func startConnectionEventListening() {
         connectionEventsTask?.cancel()
         appendEvent("Started connection event listener")
+        notifySnapshotChanged()
 
         connectionEventsTask = Task { [weak self] in
             guard let self else { return }
@@ -75,6 +79,7 @@ public final class MugSessionCoordinator {
         connectionEventsTask?.cancel()
         connectionEventsTask = nil
         appendEvent("Stopped connection event listener")
+        notifySnapshotChanged()
     }
 
     @discardableResult
@@ -92,6 +97,7 @@ public final class MugSessionCoordinator {
         if identities.isEmpty {
             status.connectionState = .disconnected
         }
+        notifySnapshotChanged()
 
         return identities
     }
@@ -112,6 +118,7 @@ public final class MugSessionCoordinator {
 
         try await refresh()
         try await subscribeToNotificationsIfSupported()
+        notifySnapshotChanged()
     }
 
     public func disconnect() async {
@@ -122,6 +129,9 @@ public final class MugSessionCoordinator {
         self.selectedMug = nil
         self.capabilityMap = nil
         status.connectionState = .disconnected
+        notificationTask?.cancel()
+        notificationTask = nil
+        notifySnapshotChanged()
     }
 
     public func refresh(at timestamp: Date = Date()) async throws {
@@ -137,6 +147,7 @@ public final class MugSessionCoordinator {
 
         status = reducer.reduce(status: status, with: event)
         absorbWarningsFromStatus()
+        notifySnapshotChanged()
     }
 
     public func handleConnectionEvent(_ event: BLEConnectionEvent) async {
@@ -144,14 +155,17 @@ public final class MugSessionCoordinator {
         case .connected(let id):
             appendEvent("Connected \(id.uuidString)")
             status.connectionState = .connected
+            notifySnapshotChanged()
         case .disconnected(let id, let expected):
             appendEvent("Disconnected \(id.uuidString) expected=\(expected)")
             status.connectionState = .disconnected
+            notifySnapshotChanged()
             guard !expected, let selectedMug, selectedMug.id == id else { return }
             await attemptReconnect(to: selectedMug)
         case .connectionFailed(let id, let message):
             appendEvent("Connection failed \(id.uuidString): \(message)")
             status.connectionState = .disconnected
+            notifySnapshotChanged()
         }
     }
 
@@ -167,8 +181,22 @@ public final class MugSessionCoordinator {
     private func subscribeToNotificationsIfSupported() async throws {
         guard let selectedMug, capabilityMap?.supportsPushEvents == true else { return }
 
-        _ = try await bluetooth.subscribe(to: EmberCharacteristic.pushEvents, on: selectedMug.id)
+        notificationTask?.cancel()
+        let stream = try await bluetooth.subscribe(to: EmberCharacteristic.pushEvents, on: selectedMug.id)
+        notificationTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await _ in stream {
+                    if Task.isCancelled { break }
+                    try await self.refresh()
+                }
+            } catch {
+                self.appendEvent("Push stream failed: \(error.localizedDescription)")
+                self.notifySnapshotChanged()
+            }
+        }
         appendEvent("Subscribed to push events")
+        notifySnapshotChanged()
     }
 
     private func attemptReconnect(to identity: MugIdentity) async {
@@ -208,6 +236,10 @@ public final class MugSessionCoordinator {
         case .permissive:
             diagnostics.parseWarnings = Array(Set(diagnostics.parseWarnings + warnings)).sorted()
         }
+    }
+
+    private func notifySnapshotChanged() {
+        onSnapshotChanged?(snapshot)
     }
 }
 
