@@ -8,6 +8,9 @@ actor MockBluetoothManager: BluetoothManaging {
     var capabilities: MugCapabilityMap = MugCapabilityMap(readable: EmberCharacteristic.readOnlyStatus, notifiable: [])
     var reads: [BLECharacteristicID: Data] = [:]
     var subscribedCharacteristics: [BLECharacteristicID] = []
+    var connectError: CoreBluetoothManagerError?
+    var readError: CoreBluetoothManagerError?
+    var disconnectedDeviceIDs: [UUID] = []
 
     private let events: AsyncStream<BLEConnectionEvent>
     private let continuation: AsyncStream<BLEConnectionEvent>.Continuation
@@ -29,13 +32,23 @@ actor MockBluetoothManager: BluetoothManaging {
     func startScanning() async throws -> [BLEDevice] { devices }
     func stopScanning() async {}
 
-    func connect(to deviceID: UUID) async throws {}
-    func disconnect(from deviceID: UUID) async {}
+    func connect(to deviceID: UUID) async throws {
+        if let connectError {
+            throw connectError
+        }
+    }
+
+    func disconnect(from deviceID: UUID) async {
+        disconnectedDeviceIDs.append(deviceID)
+    }
 
     func discoverCapabilities(for deviceID: UUID) async throws -> MugCapabilityMap { capabilities }
 
     func readValue(for characteristic: BLECharacteristicID, on deviceID: UUID) async throws -> Data {
-        reads[characteristic] ?? Data()
+        if let readError {
+            throw readError
+        }
+        return reads[characteristic] ?? Data()
     }
 
     func subscribe(to characteristic: BLECharacteristicID, on deviceID: UUID) async throws -> AsyncThrowingStream<Data, Error> {
@@ -173,6 +186,64 @@ final class MugSessionCoordinatorIntegrationTests: XCTestCase {
 
         XCTAssertTrue(coordinator.diagnostics.parseWarnings.contains { $0.contains("temperature") })
     }
+
+    func testConnectFailureRollsBackSelectedMugStateAndEmitsFailureEvent() async throws {
+        let mock = MockBluetoothManager()
+        let mug = UUID()
+        await mock.setDevices([BLEDevice(id: mug, name: "Flaky", rssi: -45)])
+        await mock.setConnectError(.notConnected(mug))
+
+        let coordinator = MugSessionCoordinator(bluetooth: mock)
+        let ranked = try await coordinator.scanAndRankDevices()
+
+        do {
+            try await coordinator.connect(to: ranked[0])
+            XCTFail("Expected connect to throw")
+        } catch let error as CoreBluetoothManagerError {
+            XCTAssertEqual(error, .notConnected(mug))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertNil(coordinator.selectedMug)
+        XCTAssertNil(coordinator.capabilityMap)
+        XCTAssertEqual(coordinator.status.connectionState, .disconnected)
+        XCTAssertTrue(coordinator.diagnostics.connectionEvents.contains { $0.message.contains("Connect failed") })
+        let disconnectedDeviceIDs = await mock.getDisconnectedDeviceIDs()
+        XCTAssertEqual(disconnectedDeviceIDs, [mug])
+    }
+
+    func testDisconnectDuringReadRollsBackStateAndDisconnectsDevice() async throws {
+        let mock = MockBluetoothManager()
+        let mug = UUID()
+        await mock.setDevices([BLEDevice(id: mug, name: "ReadFail", rssi: -35)])
+        await mock.setReads([
+            EmberCharacteristic.currentTemp: Data([0xF4, 0x09]),
+            EmberCharacteristic.targetTemp: Data([0x2C, 0x1E]),
+            EmberCharacteristic.battery: Data([75, 1]),
+            EmberCharacteristic.liquidState: Data([3])
+        ])
+        await mock.setReadError(.notConnected(mug))
+
+        let coordinator = MugSessionCoordinator(bluetooth: mock)
+        let ranked = try await coordinator.scanAndRankDevices()
+
+        do {
+            try await coordinator.connect(to: ranked[0])
+            XCTFail("Expected connect to throw when read fails")
+        } catch let error as CoreBluetoothManagerError {
+            XCTAssertEqual(error, .notConnected(mug))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertNil(coordinator.selectedMug)
+        XCTAssertNil(coordinator.capabilityMap)
+        XCTAssertEqual(coordinator.status.connectionState, .disconnected)
+        XCTAssertTrue(coordinator.diagnostics.connectionEvents.contains { $0.message.contains("Connect failed") })
+        let disconnectedDeviceIDs = await mock.getDisconnectedDeviceIDs()
+        XCTAssertEqual(disconnectedDeviceIDs, [mug])
+    }
 }
 
 private extension MockBluetoothManager {
@@ -182,5 +253,17 @@ private extension MockBluetoothManager {
 
     func setReads(_ reads: [BLECharacteristicID: Data]) {
         self.reads = reads
+    }
+
+    func setConnectError(_ connectError: CoreBluetoothManagerError?) {
+        self.connectError = connectError
+    }
+
+    func setReadError(_ readError: CoreBluetoothManagerError?) {
+        self.readError = readError
+    }
+
+    func getDisconnectedDeviceIDs() -> [UUID] {
+        disconnectedDeviceIDs
     }
 }
