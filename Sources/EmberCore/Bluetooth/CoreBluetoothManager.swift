@@ -258,6 +258,42 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
         @unknown default: return .unknown
         }
     }
+
+    fileprivate static func looksLikeEmberPeripheral(
+        peripheralName: String?,
+        advertisementData: [String: Any]
+    ) -> Bool {
+        func containsEmber(_ value: String?) -> Bool {
+            guard let value else { return false }
+            return value.localizedCaseInsensitiveContains("ember")
+        }
+
+        if containsEmber(peripheralName) {
+            return true
+        }
+
+        let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        if containsEmber(localName) {
+            return true
+        }
+
+        let allServiceUUIDs = (
+            (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []) +
+            (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID] ?? [])
+        )
+        if allServiceUUIDs.contains(where: Self.isLikelyEmberServiceUUID) {
+            return true
+        }
+
+        return false
+    }
+
+    fileprivate static func isLikelyEmberServiceUUID(_ uuid: CBUUID) -> Bool {
+        let normalized = uuid.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        // Ember characteristics use the fc54 family. In advertisements this may appear
+        // as 16-bit FC54 or as a full 128-bit UUID with fc54 prefix.
+        return normalized.hasPrefix("fc54")
+    }
 }
 
 fileprivate struct ReadRequestKey: Hashable {
@@ -283,6 +319,10 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
         guard let owner else { return }
         let id = peripheral.identifier
         let name = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
+        guard CoreBluetoothManager.looksLikeEmberPeripheral(peripheralName: name, advertisementData: advertisementData) else {
+            owner.logger.debug("Ignoring non-Ember peripheral id=\(id.uuidString, privacy: .public) name=\(name ?? "unknown", privacy: .public)")
+            return
+        }
         owner.peripheralsByID[id] = peripheral
         let next = BLEDevice(id: id, name: name, rssi: RSSI.intValue)
         owner.logger.debug("Discovered peripheral id=\(id.uuidString, privacy: .public) name=\(name ?? "unknown", privacy: .public) rssi=\(RSSI.intValue, privacy: .public)")
