@@ -8,7 +8,7 @@ let package = Package(
         .macOS("26.0")
     ],
     products: [
-        .library(name: "EmberCore", targets: ["EmberCore"])
+        .library(name: "EmberCore", type: .static, targets: ["EmberCore"])
     ],
     targets: [
         .target(name: "EmberCore"),
