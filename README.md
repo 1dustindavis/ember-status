@@ -11,7 +11,7 @@ Current implementation status for the read-only Ember status architecture descri
 - BLE transport abstractions for scan/connect/read/notify without write APIs.
 - Read-only session coordinator use case for scan ranking, connect, capability discovery, refresh, notifications, reconnect, and explicit connection-event listener lifecycle controls.
 - Diagnostics model with protocol compatibility mode (`strict` / `permissive`) and connection event tracking.
-- Thin UIKit iOS/Mac Catalyst app shell examples wired to coordinator snapshots and listener lifecycle hooks.
+- Single UIKit app target (`Apps/EmberStatusApp`) with Mac Catalyst support, wired to coordinator snapshots and listener lifecycle hooks.
 - Unit + integration tests for parsing, reducer behavior, strict/permissive warning behavior across refresh cycles, use-case workflows, and read-only guardrails.
 
 ## Run checks

@@ -33,8 +33,6 @@
   - `Protocol/` (UUID map + read parsers only)
   - `Domain/` (read-only state models)
   - `UseCases/` (scan/connect/subscribe/read flows)
-- `Apps/iOS/`
-- `Apps/macOS/`
 - `Tests/EmberCoreTests/`
 
 ### Runtime layers
