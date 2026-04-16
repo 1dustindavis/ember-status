@@ -28,6 +28,16 @@ public enum LiquidState: Equatable, Sendable {
         default: self = .unknown(rawValue)
         }
     }
+
+    public var displayName: String {
+        switch self {
+        case .empty: return "Empty"
+        case .filling: return "Filling"
+        case .cooling: return "Cooling"
+        case .heating: return "Heating"
+        case .unknown(let value): return "Unknown (\(value))"
+        }
+    }
 }
 
 public enum ConnectionState: Equatable, Sendable {
