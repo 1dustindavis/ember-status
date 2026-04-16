@@ -200,13 +200,14 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
     private func ensurePoweredOn() async throws {
         var availability = await availability
 
-        // CoreBluetooth can briefly report `.unknown` during startup.
-        // Poll a short time before failing so first-tap scan is reliable.
-        if availability == .unknown {
-            for _ in 0..<20 {
-                try? await Task.sleep(nanoseconds: 100_000_000)
+        // On first launch, authorization/state can settle asynchronously after
+        // the user responds to the Bluetooth prompt. Give CoreBluetooth time
+        // to transition to poweredOn before failing.
+        if availability != .poweredOn {
+            for _ in 0..<48 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
                 availability = await self.availability
-                if availability != .unknown {
+                if availability == .poweredOn {
                     break
                 }
             }

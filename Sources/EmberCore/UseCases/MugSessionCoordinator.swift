@@ -84,14 +84,21 @@ public final class MugSessionCoordinator {
 
     @discardableResult
     public func scanAndRankDevices() async throws -> [MugIdentity] {
-        let availability = await bluetooth.availability
-        guard availability == .poweredOn else {
-            status.connectionState = .disconnected
-            throw SessionError.bluetoothUnavailable(availability)
+        status.connectionState = .scanning
+        notifySnapshotChanged()
+
+        let devices: [BLEDevice]
+        do {
+            devices = try await bluetooth.startScanning().sorted { $0.rssi > $1.rssi }
+        } catch let error as CoreBluetoothManagerError {
+            if case .bluetoothUnavailable(let availability) = error {
+                status.connectionState = .disconnected
+                notifySnapshotChanged()
+                throw SessionError.bluetoothUnavailable(availability)
+            }
+            throw error
         }
 
-        status.connectionState = .scanning
-        let devices = try await bluetooth.startScanning().sorted { $0.rssi > $1.rssi }
         let identities = devices.map { MugIdentity(id: $0.id, name: $0.name, rssi: $0.rssi) }
 
         if identities.isEmpty {
