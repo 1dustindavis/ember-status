@@ -3,6 +3,17 @@ import OSLog
 import EmberCore
 
 final class ESMainViewController: UIViewController {
+    private enum ViewError: Error, LocalizedError {
+        case scanTimedOut
+
+        var errorDescription: String? {
+            switch self {
+            case .scanTimedOut:
+                return "Scan timed out. Please try again."
+            }
+        }
+    }
+
     private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "UI")
     private var coordinator: MugSessionCoordinator?
     private var discoveredMugs: [MugIdentity] = []
@@ -166,17 +177,21 @@ final class ESMainViewController: UIViewController {
         isScanning = true
         lastErrorMessage = nil
         logger.info("Scan tapped")
+        NSLog("[UI] Scan tapped")
         renderSnapshot()
 
         Task {
             do {
                 let coordinator = await MainActor.run { self.ensureCoordinator() }
-                let devices = try await coordinator.scanAndRankDevices()
+                let devices = try await self.withTimeout(seconds: 12) {
+                    try await coordinator.scanAndRankDevices()
+                }
                 await MainActor.run {
                     self.discoveredMugs = devices
                     self.lastErrorMessage = devices.isEmpty ? "Scan completed: no mugs found nearby." : nil
                     self.isScanning = false
                     self.logger.info("Scan finished with \(devices.count, privacy: .public) mugs")
+                    NSLog("[UI] Scan finished with \(devices.count) mugs")
                     self.renderSnapshot()
                 }
             } catch {
@@ -184,9 +199,31 @@ final class ESMainViewController: UIViewController {
                     self.lastErrorMessage = error.localizedDescription
                     self.isScanning = false
                     self.logger.error("Scan failed: \(error.localizedDescription, privacy: .public)")
+                    NSLog("[UI] Scan failed: \(error.localizedDescription)")
                     self.renderSnapshot()
                 }
             }
+        }
+    }
+
+    private func withTimeout<T: Sendable>(
+        seconds: Double,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw ViewError.scanTimedOut
+            }
+
+            guard let first = try await group.next() else {
+                throw ViewError.scanTimedOut
+            }
+            group.cancelAll()
+            return first
         }
     }
 

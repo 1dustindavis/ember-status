@@ -1,9 +1,29 @@
 import Foundation
 
 public final class MugSessionCoordinator {
-    public enum SessionError: Error, Equatable {
+    public enum SessionError: Error, Equatable, LocalizedError {
         case bluetoothUnavailable(BLEAvailability)
         case noDeviceSelected
+
+        public var errorDescription: String? {
+            switch self {
+            case .bluetoothUnavailable(let availability):
+                switch availability {
+                case .poweredOn:
+                    return "Bluetooth is available."
+                case .unknown:
+                    return "Bluetooth is still initializing. Try again in a moment."
+                case .poweredOff:
+                    return "Bluetooth is turned off. Please enable Bluetooth and try again."
+                case .unauthorized:
+                    return "Bluetooth permission is not granted. Enable Bluetooth access in Settings."
+                case .unsupported:
+                    return "Bluetooth is not supported on this device."
+                }
+            case .noDeviceSelected:
+                return "No mug is selected."
+            }
+        }
     }
 
     public struct Snapshot: Equatable {
