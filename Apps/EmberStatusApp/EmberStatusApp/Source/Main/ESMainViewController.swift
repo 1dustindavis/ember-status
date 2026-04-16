@@ -2,7 +2,21 @@ import UIKit
 import EmberCore
 
 final class ESMainViewController: UIViewController {
+    private enum ViewError: Error, LocalizedError {
+        case scanTimedOut
+
+        var errorDescription: String? {
+            switch self {
+            case .scanTimedOut:
+                return "Scan timed out. Please try again."
+            }
+        }
+    }
+
     private var coordinator: MugSessionCoordinator?
+    private var discoveredMugs: [MugIdentity] = []
+    private var lastErrorMessage: String?
+    private var isScanning = false
 
     private var snapshot = MugSessionCoordinator.Snapshot(
         identity: nil,
@@ -18,6 +32,12 @@ final class ESMainViewController: UIViewController {
     private let batteryLabel = UILabel()
     private let chargingLabel = UILabel()
     private let warningLabel = UILabel()
+    private let devicesLabel = UILabel()
+    private let lastErrorLabel = UILabel()
+    private let lastEventLabel = UILabel()
+    private let scanButton = UIButton(type: .system)
+    private let connectButton = UIButton(type: .system)
+    private let refreshButton = UIButton(type: .system)
 
     private lazy var labels: [UILabel] = [
         nameLabel,
@@ -26,7 +46,10 @@ final class ESMainViewController: UIViewController {
         targetTempLabel,
         batteryLabel,
         chargingLabel,
-        warningLabel
+        warningLabel,
+        devicesLabel,
+        lastErrorLabel,
+        lastEventLabel
     ]
 
     init() {
@@ -37,11 +60,15 @@ final class ESMainViewController: UIViewController {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
     }
 
+    deinit {
+        unbind()
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Ember Status"
         view.backgroundColor = .systemBackground
-        configureLabels()
+        configureUI()
         renderSnapshot()
     }
 
@@ -51,7 +78,13 @@ final class ESMainViewController: UIViewController {
     }
 
     func bind(to coordinator: MugSessionCoordinator) {
-        self.coordinator = coordinator
+        coordinator.onSnapshotChanged = { [weak self] next in
+            guard let self else { return }
+            Task { @MainActor in
+                self.snapshot = next
+                self.renderSnapshot()
+            }
+        }
         coordinator.startConnectionEventListening()
         snapshot = coordinator.snapshot
         renderSnapshot()
@@ -59,27 +92,60 @@ final class ESMainViewController: UIViewController {
 
     func unbind() {
         coordinator?.stopConnectionEventListening()
-        coordinator = nil
+        coordinator?.onSnapshotChanged = nil
     }
 
-    private func configureLabels() {
+    @MainActor
+    private func ensureCoordinator() -> MugSessionCoordinator {
+        if let coordinator {
+            return coordinator
+        }
+
+        let coordinator = MugSessionCoordinator(bluetooth: CoreBluetoothManager())
+        bind(to: coordinator)
+        self.coordinator = coordinator
+        return coordinator
+    }
+
+    private func configureUI() {
         labels.forEach { label in
             label.numberOfLines = 1
             label.font = .preferredFont(forTextStyle: .body)
             view.addSubview(label)
         }
         nameLabel.font = .preferredFont(forTextStyle: .headline)
+        devicesLabel.font = .preferredFont(forTextStyle: .subheadline)
+        lastErrorLabel.font = .preferredFont(forTextStyle: .caption1)
+        lastEventLabel.font = .preferredFont(forTextStyle: .caption1)
+
+        configureButton(scanButton, title: "Scan", action: #selector(scanTapped))
+        configureButton(connectButton, title: "Connect", action: #selector(connectTapped))
+        configureButton(refreshButton, title: "Refresh", action: #selector(refreshTapped))
+    }
+
+    private func configureButton(_ button: UIButton, title: String, action: Selector) {
+        button.setTitle(title, for: .normal)
+        button.addTarget(self, action: action, for: .touchUpInside)
+        view.addSubview(button)
     }
 
     private func layoutLabels() {
         let inset = view.layoutMargins
         let top = view.safeAreaInsets.top + 16
         let width = max(0, view.bounds.width - inset.left - inset.right)
-        let lineHeight: CGFloat = 24
+        let lineHeight: CGFloat = 22
         let spacing: CGFloat = 8
+        let buttonHeight: CGFloat = 34
+        let buttonWidth = min(100, (width - 16) / 3)
+
+        scanButton.frame = CGRect(x: inset.left, y: top, width: buttonWidth, height: buttonHeight)
+        connectButton.frame = CGRect(x: scanButton.frame.maxX + 8, y: top, width: buttonWidth, height: buttonHeight)
+        refreshButton.frame = CGRect(x: connectButton.frame.maxX + 8, y: top, width: buttonWidth, height: buttonHeight)
+
+        let labelsTop = top + buttonHeight + 18
 
         for (index, label) in labels.enumerated() {
-            let y = top + CGFloat(index) * (lineHeight + spacing)
+            let y = labelsTop + CGFloat(index) * (lineHeight + spacing)
             label.frame = CGRect(x: inset.left, y: y, width: width, height: lineHeight)
         }
     }
@@ -92,11 +158,118 @@ final class ESMainViewController: UIViewController {
         batteryLabel.text = "Battery: \(snapshot.status.batteryPercent.map { "\($0)%" } ?? "--")"
         chargingLabel.text = "Charging: \(snapshot.status.isCharging.map { $0 ? "Yes" : "No" } ?? "--")"
         warningLabel.text = "Parse warnings: \(snapshot.diagnostics.parseWarnings.count)"
+        devicesLabel.text = "Discovered mugs: \(discoveredMugs.count)"
+        lastErrorLabel.text = "Last error: \(lastErrorMessage ?? "--")"
+        lastEventLabel.text = "Last event: \(snapshot.diagnostics.connectionEvents.last?.message ?? "--")"
+        scanButton.setTitle(isScanning ? "Scanning..." : "Scan", for: .normal)
+        scanButton.isEnabled = !isScanning
     }
 
     private func formattedTemperature(_ value: Double?) -> String {
         guard let value else { return "--" }
         return String(format: "%.2f°C", value)
+    }
+
+    @objc
+    private func scanTapped() {
+        isScanning = true
+        lastErrorMessage = nil
+        NSLog("[UI] Scan tapped")
+        renderSnapshot()
+
+        Task {
+            do {
+                let coordinator = await MainActor.run { self.ensureCoordinator() }
+                let devices = try await self.withTimeout(seconds: 12) {
+                    try await coordinator.scanAndRankDevices()
+                }
+                await MainActor.run {
+                    self.discoveredMugs = devices
+                    self.lastErrorMessage = devices.isEmpty ? "Scan completed: no mugs found nearby." : nil
+                    self.isScanning = false
+                    NSLog("[UI] Scan finished with \(devices.count) mugs")
+                    self.renderSnapshot()
+                }
+            } catch {
+                await MainActor.run {
+                    self.lastErrorMessage = error.localizedDescription
+                    self.isScanning = false
+                    NSLog("[UI] Scan failed: \(error.localizedDescription)")
+                    self.renderSnapshot()
+                }
+            }
+        }
+    }
+
+    private func withTimeout<T: Sendable>(
+        seconds: Double,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw ViewError.scanTimedOut
+            }
+
+            guard let first = try await group.next() else {
+                throw ViewError.scanTimedOut
+            }
+            group.cancelAll()
+            return first
+        }
+    }
+
+    @objc
+    private func connectTapped() {
+        guard !discoveredMugs.isEmpty else {
+            lastErrorMessage = "No discovered mugs. Tap Scan first."
+            renderSnapshot()
+            return
+        }
+
+        let sheet = UIAlertController(title: "Connect to Mug", message: nil, preferredStyle: .actionSheet)
+        for mug in discoveredMugs {
+            let title = mug.name ?? mug.id.uuidString
+            sheet.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.connect(to: mug)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = connectButton
+            popover.sourceRect = connectButton.bounds
+        }
+
+        present(sheet, animated: true)
+    }
+
+    @objc
+    private func refreshTapped() {
+        Task { @MainActor in
+            do {
+                try await ensureCoordinator().refresh()
+                lastErrorMessage = nil
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
+            renderSnapshot()
+        }
+    }
+
+    private func connect(to mug: MugIdentity) {
+        Task { @MainActor in
+            do {
+                try await ensureCoordinator().connect(to: mug)
+                lastErrorMessage = nil
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
+            renderSnapshot()
+        }
     }
 
     required init?(coder: NSCoder) {
