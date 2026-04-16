@@ -4,8 +4,7 @@ import EmberCore
 
 final class ESMainViewController: UIViewController {
     private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "UI")
-    private let bluetooth = CoreBluetoothManager()
-    private lazy var coordinator = MugSessionCoordinator(bluetooth: bluetooth)
+    private var coordinator: MugSessionCoordinator?
     private var discoveredMugs: [MugIdentity] = []
     private var lastErrorMessage: String?
     private var isScanning = false
@@ -61,7 +60,6 @@ final class ESMainViewController: UIViewController {
         title = "Ember Status"
         view.backgroundColor = .systemBackground
         configureUI()
-        bind(to: coordinator)
         renderSnapshot()
     }
 
@@ -84,8 +82,20 @@ final class ESMainViewController: UIViewController {
     }
 
     func unbind() {
-        coordinator.stopConnectionEventListening()
-        coordinator.onSnapshotChanged = nil
+        coordinator?.stopConnectionEventListening()
+        coordinator?.onSnapshotChanged = nil
+    }
+
+    @MainActor
+    private func ensureCoordinator() -> MugSessionCoordinator {
+        if let coordinator {
+            return coordinator
+        }
+
+        let coordinator = MugSessionCoordinator(bluetooth: CoreBluetoothManager())
+        bind(to: coordinator)
+        self.coordinator = coordinator
+        return coordinator
     }
 
     private func configureUI() {
@@ -160,6 +170,7 @@ final class ESMainViewController: UIViewController {
 
         Task {
             do {
+                let coordinator = await MainActor.run { self.ensureCoordinator() }
                 let devices = try await coordinator.scanAndRankDevices()
                 await MainActor.run {
                     self.discoveredMugs = devices
@@ -208,7 +219,7 @@ final class ESMainViewController: UIViewController {
     private func refreshTapped() {
         Task { @MainActor in
             do {
-                try await coordinator.refresh()
+                try await ensureCoordinator().refresh()
                 lastErrorMessage = nil
             } catch {
                 lastErrorMessage = error.localizedDescription
@@ -220,7 +231,7 @@ final class ESMainViewController: UIViewController {
     private func connect(to mug: MugIdentity) {
         Task { @MainActor in
             do {
-                try await coordinator.connect(to: mug)
+                try await ensureCoordinator().connect(to: mug)
                 lastErrorMessage = nil
             } catch {
                 lastErrorMessage = error.localizedDescription
