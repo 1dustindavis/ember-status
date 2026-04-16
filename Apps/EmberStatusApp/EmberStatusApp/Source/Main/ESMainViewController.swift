@@ -1,5 +1,6 @@
 import UIKit
 import EmberCore
+import OSLog
 
 final class ESMainViewController: UIViewController {
     private enum ViewError: Error, LocalizedError {
@@ -38,6 +39,7 @@ final class ESMainViewController: UIViewController {
     private let scanButton = UIButton(type: .system)
     private let connectButton = UIButton(type: .system)
     private let refreshButton = UIButton(type: .system)
+    private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "UI")
 
     private lazy var labels: [UILabel] = [
         nameLabel,
@@ -78,11 +80,13 @@ final class ESMainViewController: UIViewController {
     }
 
     func bind(to coordinator: MugSessionCoordinator) {
+        logNotice("[UI] binding coordinator")
         coordinator.onSnapshotChanged = { [weak self] next in
-            guard let self else { return }
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 self.snapshot = next
                 self.renderSnapshot()
+                self.logger.debug("[UI] snapshot updated state=\(String(describing: next.status.connectionState)) selected=\(next.identity?.id.uuidString ?? "none")")
             }
         }
         coordinator.startConnectionEventListening()
@@ -91,6 +95,7 @@ final class ESMainViewController: UIViewController {
     }
 
     func unbind() {
+        logNotice("[UI] unbinding coordinator")
         coordinator?.stopConnectionEventListening()
         coordinator?.onSnapshotChanged = nil
     }
@@ -101,6 +106,7 @@ final class ESMainViewController: UIViewController {
             return coordinator
         }
 
+        logNotice("[UI] creating coordinator")
         let coordinator = MugSessionCoordinator(bluetooth: CoreBluetoothManager())
         bind(to: coordinator)
         self.coordinator = coordinator
@@ -174,7 +180,7 @@ final class ESMainViewController: UIViewController {
     private func scanTapped() {
         isScanning = true
         lastErrorMessage = nil
-        NSLog("[UI] Scan tapped")
+        logNotice("[UI] scan tapped")
         renderSnapshot()
 
         Task {
@@ -187,14 +193,14 @@ final class ESMainViewController: UIViewController {
                     self.discoveredMugs = devices
                     self.lastErrorMessage = devices.isEmpty ? "Scan completed: no mugs found nearby." : nil
                     self.isScanning = false
-                    NSLog("[UI] Scan finished with \(devices.count) mugs")
+                    self.logNotice("[UI] scan completed count=\(devices.count)")
                     self.renderSnapshot()
                 }
             } catch {
                 await MainActor.run {
                     self.lastErrorMessage = error.localizedDescription
                     self.isScanning = false
-                    NSLog("[UI] Scan failed: \(error.localizedDescription)")
+                    self.logError("[UI] scan failed error=\(error.localizedDescription)")
                     self.renderSnapshot()
                 }
             }
@@ -224,14 +230,16 @@ final class ESMainViewController: UIViewController {
 
     @objc
     private func connectTapped() {
-        guard !discoveredMugs.isEmpty else {
+        guard !self.discoveredMugs.isEmpty else {
             lastErrorMessage = "No discovered mugs. Tap Scan first."
+            logNotice("[UI] connect tapped with no discovered mugs")
             renderSnapshot()
             return
         }
+        logNotice("[UI] connect tapped options=\(self.discoveredMugs.count)")
 
         let sheet = UIAlertController(title: "Connect to Mug", message: nil, preferredStyle: .actionSheet)
-        for mug in discoveredMugs {
+        for mug in self.discoveredMugs {
             let title = mug.name ?? mug.id.uuidString
             sheet.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 self?.connect(to: mug)
@@ -240,33 +248,39 @@ final class ESMainViewController: UIViewController {
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
 
         if let popover = sheet.popoverPresentationController {
-            popover.sourceView = connectButton
-            popover.sourceRect = connectButton.bounds
+            popover.sourceView = self.connectButton
+            popover.sourceRect = self.connectButton.bounds
         }
 
-        present(sheet, animated: true)
+        self.present(sheet, animated: true)
     }
 
     @objc
     private func refreshTapped() {
+        logNotice("[UI] refresh tapped")
         Task { @MainActor in
             do {
                 try await ensureCoordinator().refresh()
                 lastErrorMessage = nil
+                logNotice("[UI] refresh succeeded")
             } catch {
                 lastErrorMessage = error.localizedDescription
+                logError("[UI] refresh failed error=\(error.localizedDescription)")
             }
             renderSnapshot()
         }
     }
 
     private func connect(to mug: MugIdentity) {
+        logNotice("[UI] connect selected id=\(mug.id.uuidString) name=\(mug.name ?? "unknown")")
         Task { @MainActor in
             do {
                 try await ensureCoordinator().connect(to: mug)
                 lastErrorMessage = nil
+                logNotice("[UI] connect succeeded id=\(mug.id.uuidString)")
             } catch {
                 lastErrorMessage = error.localizedDescription
+                logError("[UI] connect failed id=\(mug.id.uuidString) error=\(error.localizedDescription)")
             }
             renderSnapshot()
         }
@@ -274,5 +288,15 @@ final class ESMainViewController: UIViewController {
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+    }
+
+    private func logNotice(_ message: String) {
+        logger.notice("\(message)")
+        NSLog("%@", message)
+    }
+
+    private func logError(_ message: String) {
+        logger.error("\(message)")
+        NSLog("%@", message)
     }
 }

@@ -1,9 +1,12 @@
 import Foundation
+import OSLog
 
 public final class MugSessionCoordinator {
     public enum SessionError: Error, Equatable, LocalizedError {
         case bluetoothUnavailable(BLEAvailability)
         case noDeviceSelected
+        case notConnected
+        case operationTimedOut(operation: String)
 
         public var errorDescription: String? {
             switch self {
@@ -22,6 +25,10 @@ public final class MugSessionCoordinator {
                 }
             case .noDeviceSelected:
                 return "No mug is selected."
+            case .notConnected:
+                return "Mug is not connected."
+            case .operationTimedOut(let operation):
+                return "\(operation.capitalized) timed out. Please try again."
             }
         }
     }
@@ -48,6 +55,7 @@ public final class MugSessionCoordinator {
     private let bluetooth: BluetoothManaging
     private let reducer: MugStatusReducer
     private let reconnectMaxAttempts: Int
+    private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "Session")
     private var connectionEventsTask: Task<Void, Never>?
     private var notificationTask: Task<Void, Never>?
 
@@ -84,6 +92,7 @@ public final class MugSessionCoordinator {
     public func startConnectionEventListening() {
         connectionEventsTask?.cancel()
         appendEvent("Started connection event listener")
+        logNotice("[Session] connection event listener started")
         notifySnapshotChanged()
 
         connectionEventsTask = Task { [weak self] in
@@ -99,11 +108,13 @@ public final class MugSessionCoordinator {
         connectionEventsTask?.cancel()
         connectionEventsTask = nil
         appendEvent("Stopped connection event listener")
+        logNotice("[Session] connection event listener stopped")
         notifySnapshotChanged()
     }
 
     @discardableResult
     public func scanAndRankDevices() async throws -> [MugIdentity] {
+        logNotice("[Session] scan started")
         status.connectionState = .scanning
         notifySnapshotChanged()
 
@@ -114,44 +125,74 @@ public final class MugSessionCoordinator {
             if case .bluetoothUnavailable(let availability) = error {
                 status.connectionState = .disconnected
                 notifySnapshotChanged()
+                logError("[Session] scan failed bluetoothUnavailable availability=\(String(describing: availability))")
                 throw SessionError.bluetoothUnavailable(availability)
             }
+            logError("[Session] scan failed error=\(error.localizedDescription)")
             throw error
         }
 
         let identities = devices.map { MugIdentity(id: $0.id, name: $0.name, rssi: $0.rssi) }
 
-        if identities.isEmpty {
-            status.connectionState = .disconnected
-        }
+        status.connectionState = .disconnected
+        logNotice("[Session] scan completed discovered=\(identities.count)")
         notifySnapshotChanged()
 
         return identities
     }
 
     public func connect(to identity: MugIdentity) async throws {
+        let previousSelection = selectedMug
+        let previousCapabilityMap = capabilityMap
+        let previousConnectionState = status.connectionState
+
         selectedMug = identity
         status.connectionState = .connecting
         appendEvent("Connecting to \(identity.id.uuidString)")
-
-        try await bluetooth.connect(to: identity.id)
-        capabilityMap = try await bluetooth.discoverCapabilities(for: identity.id)
-        status.connectionState = .connected
-
-        if let capabilityMap {
-            diagnostics.discoveredReadableCharacteristics = capabilityMap.readable.map(\.uuid).sorted()
-            diagnostics.discoveredNotificationCharacteristics = capabilityMap.notifiable.map(\.uuid).sorted()
-        }
-
-        try await refresh()
-        try await subscribeToNotificationsIfSupported()
+        logNotice("[Session] connect started id=\(identity.id.uuidString)")
         notifySnapshotChanged()
+
+        do {
+            try await withTimeout(seconds: 12, operation: "connect") {
+                try await self.bluetooth.connect(to: identity.id)
+            }
+            logNotice("[Session] connect transport established id=\(identity.id.uuidString)")
+            capabilityMap = try await withTimeout(seconds: 12, operation: "capability discovery") {
+                try await self.bluetooth.discoverCapabilities(for: identity.id)
+            }
+            logNotice("[Session] capabilities discovered id=\(identity.id.uuidString) readable=\(self.capabilityMap?.readable.count ?? 0) notify=\(self.capabilityMap?.notifiable.count ?? 0)")
+            status.connectionState = .connected
+
+            if let capabilityMap {
+                diagnostics.discoveredReadableCharacteristics = capabilityMap.readable.map(\.uuid).sorted()
+                diagnostics.discoveredNotificationCharacteristics = capabilityMap.notifiable.map(\.uuid).sorted()
+            }
+
+            try await withTimeout(seconds: 10, operation: "initial refresh") {
+                try await self.refresh()
+            }
+            try await subscribeToNotificationsIfSupported()
+            logNotice("[Session] connect completed id=\(identity.id.uuidString)")
+            notifySnapshotChanged()
+        } catch {
+            selectedMug = previousSelection
+            capabilityMap = previousCapabilityMap
+            status.connectionState = previousConnectionState
+            notificationTask?.cancel()
+            notificationTask = nil
+            await bluetooth.disconnect(from: identity.id)
+            appendEvent("Connect failed \(identity.id.uuidString): \(error.localizedDescription)")
+            logError("[Session] connect failed id=\(identity.id.uuidString) error=\(error.localizedDescription)")
+            notifySnapshotChanged()
+            throw error
+        }
     }
 
     public func disconnect() async {
         stopConnectionEventListening()
         guard let selectedMug else { return }
         appendEvent("Manual disconnect")
+        logNotice("[Session] disconnect requested id=\(selectedMug.id.uuidString)")
         await bluetooth.disconnect(from: selectedMug.id)
         self.selectedMug = nil
         self.capabilityMap = nil
@@ -163,6 +204,8 @@ public final class MugSessionCoordinator {
 
     public func refresh(at timestamp: Date = Date()) async throws {
         guard let selectedMug else { throw SessionError.noDeviceSelected }
+        guard status.connectionState == .connected else { throw SessionError.notConnected }
+        logger.debug("[Session] refresh started id=\(selectedMug.id.uuidString)")
 
         let event = MugStatusReducer.Event(
             currentTempData: try await readIfSupported(EmberCharacteristic.currentTemp, on: selectedMug.id),
@@ -174,10 +217,12 @@ public final class MugSessionCoordinator {
 
         status = reducer.reduce(status: status, with: event)
         absorbWarningsFromStatus()
+        logger.debug("[Session] refresh completed id=\(selectedMug.id.uuidString) warnings=\(self.diagnostics.parseWarnings.count)")
         notifySnapshotChanged()
     }
 
     public func handleConnectionEvent(_ event: BLEConnectionEvent) async {
+        logNotice("[Session] connection event=\(String(describing: event))")
         switch event {
         case .connected(let id):
             appendEvent("Connected \(id.uuidString)")
@@ -219,25 +264,31 @@ public final class MugSessionCoordinator {
                 }
             } catch {
                 self.appendEvent("Push stream failed: \(error.localizedDescription)")
+                self.logError("[Session] push stream failed id=\(selectedMug.id.uuidString) error=\(error.localizedDescription)")
                 self.notifySnapshotChanged()
             }
         }
         appendEvent("Subscribed to push events")
+        logNotice("[Session] push subscription established id=\(selectedMug.id.uuidString)")
         notifySnapshotChanged()
     }
 
     private func attemptReconnect(to identity: MugIdentity) async {
         guard reconnectMaxAttempts > 0 else { return }
+        logNotice("[Session] reconnect started id=\(identity.id.uuidString) maxAttempts=\(self.reconnectMaxAttempts)")
 
         for attempt in 1...reconnectMaxAttempts {
             do {
                 try await Task.sleep(nanoseconds: UInt64(attempt) * 200_000_000)
                 appendEvent("Reconnect attempt \(attempt)")
+                logNotice("[Session] reconnect attempt=\(attempt) id=\(identity.id.uuidString)")
                 try await connect(to: identity)
                 appendEvent("Reconnect succeeded")
+                logNotice("[Session] reconnect succeeded id=\(identity.id.uuidString)")
                 return
             } catch {
                 appendEvent("Reconnect attempt \(attempt) failed: \(error.localizedDescription)")
+                logError("[Session] reconnect failed attempt=\(attempt) id=\(identity.id.uuidString) error=\(error.localizedDescription)")
             }
         }
     }
@@ -245,6 +296,28 @@ public final class MugSessionCoordinator {
     private func readIfSupported(_ characteristic: BLECharacteristicID, on deviceID: UUID) async throws -> Data? {
         guard capabilityMap?.readable.contains(characteristic) == true else { return nil }
         return try await bluetooth.readValue(for: characteristic, on: deviceID)
+    }
+
+    private func withTimeout<T: Sendable>(
+        seconds: Double,
+        operation: String,
+        _ work: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await work()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw SessionError.operationTimedOut(operation: operation)
+            }
+
+            guard let first = try await group.next() else {
+                throw SessionError.operationTimedOut(operation: operation)
+            }
+            group.cancelAll()
+            return first
+        }
     }
 
     private func appendEvent(_ message: String) {
@@ -267,6 +340,16 @@ public final class MugSessionCoordinator {
 
     private func notifySnapshotChanged() {
         onSnapshotChanged?(snapshot)
+    }
+
+    private func logNotice(_ message: String) {
+        logger.notice("\(message)")
+        NSLog("%@", message)
+    }
+
+    private func logError(_ message: String) {
+        logger.error("\(message)")
+        NSLog("%@", message)
     }
 }
 
