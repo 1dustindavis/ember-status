@@ -1,5 +1,4 @@
 import UIKit
-import OSLog
 import EmberCore
 
 final class ESMainViewController: UIViewController {
@@ -14,7 +13,6 @@ final class ESMainViewController: UIViewController {
         }
     }
 
-    private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "UI")
     private var coordinator: MugSessionCoordinator?
     private var discoveredMugs: [MugIdentity] = []
     private var lastErrorMessage: String?
@@ -176,7 +174,6 @@ final class ESMainViewController: UIViewController {
     private func scanTapped() {
         isScanning = true
         lastErrorMessage = nil
-        logger.info("Scan tapped")
         NSLog("[UI] Scan tapped")
         renderSnapshot()
 
@@ -190,7 +187,6 @@ final class ESMainViewController: UIViewController {
                     self.discoveredMugs = devices
                     self.lastErrorMessage = devices.isEmpty ? "Scan completed: no mugs found nearby." : nil
                     self.isScanning = false
-                    self.logger.info("Scan finished with \(devices.count, privacy: .public) mugs")
                     NSLog("[UI] Scan finished with \(devices.count) mugs")
                     self.renderSnapshot()
                 }
@@ -198,7 +194,6 @@ final class ESMainViewController: UIViewController {
                 await MainActor.run {
                     self.lastErrorMessage = error.localizedDescription
                     self.isScanning = false
-                    self.logger.error("Scan failed: \(error.localizedDescription, privacy: .public)")
                     NSLog("[UI] Scan failed: \(error.localizedDescription)")
                     self.renderSnapshot()
                 }
