@@ -28,6 +28,7 @@ final class ESMainViewController: UIViewController {
 
     private let nameLabel = UILabel()
     private let connectionLabel = UILabel()
+    private let liquidStateLabel = UILabel()
     private let currentTempLabel = UILabel()
     private let targetTempLabel = UILabel()
     private let batteryLabel = UILabel()
@@ -44,6 +45,7 @@ final class ESMainViewController: UIViewController {
     private lazy var labels: [UILabel] = [
         nameLabel,
         connectionLabel,
+        liquidStateLabel,
         currentTempLabel,
         targetTempLabel,
         batteryLabel,
@@ -159,6 +161,7 @@ final class ESMainViewController: UIViewController {
     private func renderSnapshot() {
         nameLabel.text = snapshot.identity?.name ?? "No mug selected"
         connectionLabel.text = "Connection: \(String(describing: snapshot.status.connectionState))"
+        liquidStateLabel.text = "Liquid state: \(formattedLiquidState(snapshot.status.liquidState))"
         currentTempLabel.text = "Current temp: \(formattedTemperature(snapshot.status.currentTempC))"
         targetTempLabel.text = "Target temp: \(formattedTemperature(snapshot.status.targetTempC))"
         batteryLabel.text = "Battery: \(snapshot.status.batteryPercent.map { "\($0)%" } ?? "--")"
@@ -174,6 +177,11 @@ final class ESMainViewController: UIViewController {
     private func formattedTemperature(_ value: Double?) -> String {
         guard let value else { return "--" }
         return String(format: "%.2f°C", value)
+    }
+
+    private func formattedLiquidState(_ value: LiquidState?) -> String {
+        guard let value else { return "--" }
+        return value.displayName
     }
 
     @objc
