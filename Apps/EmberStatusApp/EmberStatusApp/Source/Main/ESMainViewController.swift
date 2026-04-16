@@ -6,6 +6,7 @@ final class ESMainViewController: UIViewController {
     private lazy var coordinator = MugSessionCoordinator(bluetooth: bluetooth)
     private var discoveredMugs: [MugIdentity] = []
     private var lastErrorMessage: String?
+    private var isScanning = false
 
     private var snapshot = MugSessionCoordinator.Snapshot(
         identity: nil,
@@ -139,6 +140,8 @@ final class ESMainViewController: UIViewController {
         devicesLabel.text = "Discovered mugs: \(discoveredMugs.count)"
         lastErrorLabel.text = "Last error: \(lastErrorMessage ?? "--")"
         lastEventLabel.text = "Last event: \(snapshot.diagnostics.connectionEvents.last?.message ?? "--")"
+        scanButton.setTitle(isScanning ? "Scanning..." : "Scan", for: .normal)
+        scanButton.isEnabled = !isScanning
     }
 
     private func formattedTemperature(_ value: Double?) -> String {
@@ -148,14 +151,26 @@ final class ESMainViewController: UIViewController {
 
     @objc
     private func scanTapped() {
-        Task { @MainActor in
+        isScanning = true
+        lastErrorMessage = nil
+        renderSnapshot()
+
+        Task {
             do {
-                discoveredMugs = try await coordinator.scanAndRankDevices()
-                lastErrorMessage = nil
+                let devices = try await coordinator.scanAndRankDevices()
+                await MainActor.run {
+                    self.discoveredMugs = devices
+                    self.lastErrorMessage = devices.isEmpty ? "Scan completed: no mugs found nearby." : nil
+                    self.isScanning = false
+                    self.renderSnapshot()
+                }
             } catch {
-                lastErrorMessage = error.localizedDescription
+                await MainActor.run {
+                    self.lastErrorMessage = error.localizedDescription
+                    self.isScanning = false
+                    self.renderSnapshot()
+                }
             }
-            renderSnapshot()
         }
     }
 

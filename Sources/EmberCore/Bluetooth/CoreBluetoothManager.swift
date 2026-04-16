@@ -27,7 +27,6 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
     fileprivate let queue = DispatchQueue(label: "ember.core.bluetooth")
     fileprivate let central: CBCentralManager
     fileprivate let delegateProxy: DelegateProxy
-    fileprivate var scanContinuation: CheckedContinuation<[BLEDevice], Error>?
     fileprivate var connectContinuations: [UUID: CheckedContinuation<Void, Error>] = [:]
     fileprivate var capabilitiesContinuations: [UUID: CheckedContinuation<MugCapabilityMap, Error>] = [:]
     fileprivate var readContinuations: [ReadRequestKey: CheckedContinuation<Data, Error>] = [:]
@@ -68,23 +67,24 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
 
     public func startScanning() async throws -> [BLEDevice] {
         try await ensurePoweredOn()
+        await queueAsync {
+            self.discoveredDevices.removeAll(keepingCapacity: true)
+            self.central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+        }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                self.discoveredDevices.removeAll(keepingCapacity: true)
-                self.scanContinuation = continuation
-                self.central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+        // Use a fixed scan window so UI never waits indefinitely.
+        // Real devices can advertise slowly, so keep this a bit longer.
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
 
-                self.queue.asyncAfter(deadline: .now() + .seconds(2)) {
-                    self.finishScanIfNeeded()
-                }
-            }
+        return await queueSync {
+            self.central.stopScan()
+            return Array(self.discoveredDevices.values)
         }
     }
 
     public func stopScanning() async {
-        queue.async {
-            self.finishScanIfNeeded()
+        await queueAsync {
+            self.central.stopScan()
         }
     }
 
@@ -193,17 +193,23 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
     public var connectionEvents: AsyncStream<BLEConnectionEvent> { events }
 
     private func ensurePoweredOn() async throws {
-        let availability = await availability
+        var availability = await availability
+
+        // CoreBluetooth can briefly report `.unknown` during startup.
+        // Poll a short time before failing so first-tap scan is reliable.
+        if availability == .unknown {
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                availability = await self.availability
+                if availability != .unknown {
+                    break
+                }
+            }
+        }
+
         guard availability == .poweredOn else {
             throw CoreBluetoothManagerError.bluetoothUnavailable(availability)
         }
-    }
-
-    private func finishScanIfNeeded() {
-        central.stopScan()
-        guard let continuation = scanContinuation else { return }
-        scanContinuation = nil
-        continuation.resume(returning: Array(discoveredDevices.values))
     }
 
     private func queueSyncResult<T>(_ body: @escaping () throws -> T) async throws -> T {
@@ -214,6 +220,23 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
                 } catch {
                     continuation.resume(throwing: error)
                 }
+            }
+        }
+    }
+
+    private func queueSync<T>(_ body: @escaping () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: body())
+            }
+        }
+    }
+
+    private func queueAsync(_ body: @escaping () -> Void) async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                body()
+                continuation.resume()
             }
         }
     }
