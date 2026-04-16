@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 #if canImport(CoreBluetooth)
 import CoreBluetooth
@@ -24,6 +25,7 @@ public enum CoreBluetoothManagerError: Error, LocalizedError {
 }
 
 public final class CoreBluetoothManager: NSObject, BluetoothManaging {
+    fileprivate let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "BLE")
     fileprivate let queue = DispatchQueue(label: "ember.core.bluetooth")
     fileprivate let central: CBCentralManager
     fileprivate let delegateProxy: DelegateProxy
@@ -67,6 +69,7 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
 
     public func startScanning() async throws -> [BLEDevice] {
         try await ensurePoweredOn()
+        logger.info("BLE scan start")
         await queueAsync {
             self.discoveredDevices.removeAll(keepingCapacity: true)
             self.central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
@@ -78,7 +81,9 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
 
         return await queueSync {
             self.central.stopScan()
-            return Array(self.discoveredDevices.values)
+            let devices = Array(self.discoveredDevices.values)
+            self.logger.info("BLE scan complete: \(devices.count, privacy: .public) devices")
+            return devices
         }
     }
 
@@ -208,6 +213,7 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
         }
 
         guard availability == .poweredOn else {
+            logger.error("BLE unavailable: \(String(describing: availability), privacy: .public)")
             throw CoreBluetoothManagerError.bluetoothUnavailable(availability)
         }
     }
@@ -241,7 +247,7 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
         }
     }
 
-    private static func map(state: CBManagerState) -> BLEAvailability {
+    fileprivate static func map(state: CBManagerState) -> BLEAvailability {
         switch state {
         case .poweredOn: return .poweredOn
         case .poweredOff: return .poweredOff
@@ -267,7 +273,9 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
     weak var owner: CoreBluetoothManager?
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        // No-op: availability is pulled on-demand.
+        guard let owner else { return }
+        let availability = CoreBluetoothManager.map(state: central.state)
+        owner.logger.info("Central state update: \(String(describing: availability), privacy: .public)")
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
@@ -276,6 +284,7 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
         let name = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
         owner.peripheralsByID[id] = peripheral
         let next = BLEDevice(id: id, name: name, rssi: RSSI.intValue)
+        owner.logger.debug("Discovered peripheral id=\(id.uuidString, privacy: .public) name=\(name ?? "unknown", privacy: .public) rssi=\(RSSI.intValue, privacy: .public)")
         if let existing = owner.discoveredDevices[id] {
             owner.discoveredDevices[id] = existing.rssi >= next.rssi ? existing : next
         } else {

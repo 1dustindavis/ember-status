@@ -1,7 +1,9 @@
 import UIKit
+import OSLog
 import EmberCore
 
 final class ESMainViewController: UIViewController {
+    private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "UI")
     private let bluetooth = CoreBluetoothManager()
     private lazy var coordinator = MugSessionCoordinator(bluetooth: bluetooth)
     private var discoveredMugs: [MugIdentity] = []
@@ -153,6 +155,7 @@ final class ESMainViewController: UIViewController {
     private func scanTapped() {
         isScanning = true
         lastErrorMessage = nil
+        logger.info("Scan tapped")
         renderSnapshot()
 
         Task {
@@ -162,12 +165,14 @@ final class ESMainViewController: UIViewController {
                     self.discoveredMugs = devices
                     self.lastErrorMessage = devices.isEmpty ? "Scan completed: no mugs found nearby." : nil
                     self.isScanning = false
+                    self.logger.info("Scan finished with \(devices.count, privacy: .public) mugs")
                     self.renderSnapshot()
                 }
             } catch {
                 await MainActor.run {
                     self.lastErrorMessage = error.localizedDescription
                     self.isScanning = false
+                    self.logger.error("Scan failed: \(error.localizedDescription, privacy: .public)")
                     self.renderSnapshot()
                 }
             }
