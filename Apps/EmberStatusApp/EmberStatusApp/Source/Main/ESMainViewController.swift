@@ -11,6 +11,9 @@ final class ESAppSessionStore {
         var lastErrorMessage: String?
         var autoConnectEnabled: Bool
         var preferredAutoConnectMugID: UUID?
+        var capturedFixtureCount: Int
+        var lastCapturedFixtureID: String?
+        var captureGroupsSummary: String
     }
 
     private enum ViewError: Error, LocalizedError {
@@ -45,6 +48,14 @@ final class ESAppSessionStore {
     private let defaults: UserDefaults
     private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "SessionStore")
     private var autoConnectTask: Task<Void, Never>?
+    private struct CapturedFixtureRecord {
+        let stateLabel: String
+        let sampleIndex: Int
+        let fixture: HardwareRegressionCapture
+    }
+
+    private var capturedFixtures: [CapturedFixtureRecord] = []
+    private var captureCountsByStateLabel: [String: Int] = [:]
 
     private(set) var viewState: ViewState {
         didSet {
@@ -64,7 +75,10 @@ final class ESAppSessionStore {
             isScanning: false,
             lastErrorMessage: nil,
             autoConnectEnabled: defaults.bool(forKey: DefaultsKey.autoConnectEnabled),
-            preferredAutoConnectMugID: UUID(uuidString: defaults.string(forKey: DefaultsKey.preferredMugID) ?? "")
+            preferredAutoConnectMugID: UUID(uuidString: defaults.string(forKey: DefaultsKey.preferredMugID) ?? ""),
+            capturedFixtureCount: 0,
+            lastCapturedFixtureID: nil,
+            captureGroupsSummary: "--"
         )
 
         coordinator.onSnapshotChanged = { [weak self] next in
@@ -187,6 +201,104 @@ final class ESAppSessionStore {
         return viewState.snapshot.identity?.name
             ?? viewState.preferredAutoConnectMugID?.uuidString
             ?? "None"
+    }
+
+    func captureFixtureSample(stateLabel: String, notes: String?) async throws {
+        let trimmedLabel = stateLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLabel.isEmpty else {
+            throw NSError(
+                domain: "ESAppSessionStore",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "State label is required."]
+            )
+        }
+
+        let normalizedLabel = Self.normalizedStateLabel(trimmedLabel)
+        let sampleIndex = (captureCountsByStateLabel[normalizedLabel] ?? 0) + 1
+        let timestamp = Self.captureIDDateFormatter.string(from: Date())
+        let captureID = "hardware-\(timestamp)-\(normalizedLabel)-s\(String(format: "%02d", sampleIndex))"
+        let resolvedNotes = (notes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? notes!.trimmingCharacters(in: .whitespacesAndNewlines)
+            : "Captured state: \(trimmedLabel)."
+
+        let capture = try await coordinator.captureRegressionFixture(captureID: captureID, notes: resolvedNotes)
+        capturedFixtures.append(CapturedFixtureRecord(stateLabel: normalizedLabel, sampleIndex: sampleIndex, fixture: capture))
+        captureCountsByStateLabel[normalizedLabel] = sampleIndex
+        viewState.capturedFixtureCount = capturedFixtures.count
+        viewState.captureGroupsSummary = Self.captureGroupsSummary(from: captureCountsByStateLabel)
+        viewState.lastCapturedFixtureID = capture.captureID
+        viewState.lastErrorMessage = nil
+    }
+
+    func exportCapturedFixturesJSON() throws -> String {
+        guard !capturedFixtures.isEmpty else {
+            throw NSError(
+                domain: "ESAppSessionStore",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No captures collected yet."]
+            )
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let sortedFixtures = capturedFixtures
+            .sorted {
+                if $0.stateLabel == $1.stateLabel {
+                    if $0.sampleIndex == $1.sampleIndex {
+                        return $0.fixture.captureID < $1.fixture.captureID
+                    }
+                    return $0.sampleIndex < $1.sampleIndex
+                }
+                return $0.stateLabel < $1.stateLabel
+            }
+            .map(\.fixture)
+
+        let data = try encoder.encode(sortedFixtures)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw NSError(
+                domain: "ESAppSessionStore",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to encode captured fixtures as UTF-8."]
+            )
+        }
+        return json
+    }
+
+    func clearCapturedFixtures() {
+        capturedFixtures = []
+        captureCountsByStateLabel = [:]
+        viewState.capturedFixtureCount = 0
+        viewState.lastCapturedFixtureID = nil
+        viewState.captureGroupsSummary = "--"
+    }
+
+    private static let captureIDDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        return formatter
+    }()
+
+    private static func normalizedStateLabel(_ raw: String) -> String {
+        let lower = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = lower.map { character -> Character in
+            if character.isLetter || character.isNumber { return character }
+            return "-"
+        }
+        let collapsed = String(allowed)
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .joined(separator: "-")
+        return collapsed.isEmpty ? "unlabeled" : collapsed
+    }
+
+    private static func captureGroupsSummary(from counts: [String: Int]) -> String {
+        guard !counts.isEmpty else { return "--" }
+        return counts
+            .keys
+            .sorted()
+            .map { "\($0): \(counts[$0] ?? 0)" }
+            .joined(separator: ", ")
     }
 
     private func startAutoConnectIfNeeded() {
@@ -476,6 +588,9 @@ final class ESConnectionViewController: UIViewController {
     private var lastErrorMessage: String?
     private var autoConnectEnabled = false
     private var preferredMugText = "None"
+    private var capturedFixtureCount = 0
+    private var lastCapturedFixtureID: String?
+    private var captureGroupsSummary = "--"
     private var rows: [DetailRow] = []
 
     private let autoConnectSwitch = UISwitch()
@@ -498,6 +613,18 @@ final class ESConnectionViewController: UIViewController {
         target: self,
         action: #selector(disconnectTapped)
     )
+    private lazy var captureBarButtonItem = UIBarButtonItem(
+        title: "Capture",
+        style: .plain,
+        target: self,
+        action: #selector(captureTapped)
+    )
+    private lazy var exportBarButtonItem = UIBarButtonItem(
+        title: "Export",
+        style: .plain,
+        target: self,
+        action: #selector(exportTapped)
+    )
 
     init(store: ESAppSessionStore) {
         self.store = store
@@ -517,7 +644,7 @@ final class ESConnectionViewController: UIViewController {
     }
 
     private func configureUI() {
-        navigationItem.rightBarButtonItem = scanBarButtonItem
+        navigationItem.rightBarButtonItems = [scanBarButtonItem, captureBarButtonItem, exportBarButtonItem]
         navigationItem.leftBarButtonItems = [connectBarButtonItem, disconnectBarButtonItem]
 
         tableView.translatesAutoresizingMaskIntoConstraints = false
@@ -551,6 +678,9 @@ final class ESConnectionViewController: UIViewController {
             self.lastErrorMessage = state.lastErrorMessage
             self.autoConnectEnabled = state.autoConnectEnabled
             self.preferredMugText = store.preferredAutoConnectMugName()
+            self.capturedFixtureCount = state.capturedFixtureCount
+            self.lastCapturedFixtureID = state.lastCapturedFixtureID
+            self.captureGroupsSummary = state.captureGroupsSummary
             self.renderState()
         }
     }
@@ -569,6 +699,9 @@ final class ESConnectionViewController: UIViewController {
             DetailRow(title: "Connection", value: String(describing: snapshot.status.connectionState).capitalized),
             DetailRow(title: "Discovered Mugs", value: "\(discoveredMugs.count)"),
             DetailRow(title: "Preferred Mug", value: preferredMugText),
+            DetailRow(title: "Captured Fixtures", value: "\(capturedFixtureCount)"),
+            DetailRow(title: "Capture Groups", value: captureGroupsSummary),
+            DetailRow(title: "Last Capture ID", value: lastCapturedFixtureID ?? "--"),
             DetailRow(title: "Last Error", value: lastErrorMessage ?? "--"),
             DetailRow(title: "Last Event", value: snapshot.diagnostics.connectionEvents.last?.message ?? "--")
         ]
@@ -581,6 +714,8 @@ final class ESConnectionViewController: UIViewController {
         scanBarButtonItem.isEnabled = !isScanning
         connectBarButtonItem.isEnabled = !discoveredMugs.isEmpty
         disconnectBarButtonItem.isEnabled = snapshot.identity != nil
+        captureBarButtonItem.isEnabled = snapshot.status.connectionState == .connected
+        exportBarButtonItem.isEnabled = capturedFixtureCount > 0
     }
 
     @objc
@@ -629,6 +764,74 @@ final class ESConnectionViewController: UIViewController {
         }
 
         store.setAutoConnectEnabled(autoConnectSwitch.isOn)
+    }
+
+    @objc
+    private func captureTapped() {
+        let alert = UIAlertController(
+            title: "Capture Hardware Fixture",
+            message: "Enter a state label. Repeated captures of the same label are grouped automatically.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = "State label (e.g., idle-empty, overshoot-cooling)"
+            field.text = ""
+            field.autocapitalizationType = .none
+            field.autocorrectionType = .no
+            field.clearButtonMode = .whileEditing
+        }
+        alert.addTextField { field in
+            field.placeholder = "Notes (optional)"
+            field.text = ""
+            field.clearButtonMode = .whileEditing
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Capture", style: .default) { [weak self, weak alert] _ in
+            guard let self, let alert else { return }
+            let stateLabel = alert.textFields?.first?.text ?? ""
+            let notes = alert.textFields?.dropFirst().first?.text
+            self.runCapture(stateLabel: stateLabel, notes: notes)
+        })
+
+        present(alert, animated: true)
+    }
+
+    @objc
+    private func exportTapped() {
+        guard let store else { return }
+
+        do {
+            let json = try store.exportCapturedFixturesJSON()
+            UIPasteboard.general.string = json
+            let alert = UIAlertController(
+                title: "Copied Fixture JSON",
+                message: "Captured fixtures JSON was copied to clipboard. Paste into Tests/EmberCoreTests/Fixtures/hardware-regression-fixtures.json.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            alert.addAction(UIAlertAction(title: "Clear Captures", style: .destructive) { _ in
+                store.clearCapturedFixtures()
+            })
+            present(alert, animated: true)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            renderState()
+        }
+    }
+
+    private func runCapture(stateLabel: String, notes: String?) {
+        guard let store else { return }
+
+        Task {
+            do {
+                try await store.captureFixtureSample(stateLabel: stateLabel, notes: notes)
+                lastErrorMessage = nil
+                renderState()
+            } catch {
+                lastErrorMessage = "Capture failed: \(error.localizedDescription)"
+                renderState()
+            }
+        }
     }
 }
 

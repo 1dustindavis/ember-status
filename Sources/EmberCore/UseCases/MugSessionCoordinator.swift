@@ -7,6 +7,7 @@ public final class MugSessionCoordinator {
         case noDeviceSelected
         case notConnected
         case operationTimedOut(operation: String)
+        case missingCaptureCharacteristic(String)
 
         public var errorDescription: String? {
             switch self {
@@ -29,6 +30,8 @@ public final class MugSessionCoordinator {
                 return "Mug is not connected."
             case .operationTimedOut(let operation):
                 return "\(operation.capitalized) timed out. Please try again."
+            case .missingCaptureCharacteristic(let name):
+                return "Capture requires \(name), but it was unavailable from this mug."
             }
         }
     }
@@ -250,6 +253,44 @@ public final class MugSessionCoordinator {
         )
     }
 
+    public func captureRegressionFixture(captureID: String, notes: String) async throws -> HardwareRegressionCapture {
+        guard let selectedMug else { throw SessionError.noDeviceSelected }
+        guard status.connectionState == .connected else { throw SessionError.notConnected }
+
+        let currentTempData = try await readIfSupported(EmberCharacteristic.currentTemp, on: selectedMug.id)
+        let targetTempData = try await readIfSupported(EmberCharacteristic.targetTemp, on: selectedMug.id)
+        let batteryData = try await readIfSupported(EmberCharacteristic.battery, on: selectedMug.id)
+        let liquidStateData = try await readIfSupported(EmberCharacteristic.liquidState, on: selectedMug.id)
+
+        guard let currentTempData else { throw SessionError.missingCaptureCharacteristic("current temperature") }
+        guard let targetTempData else { throw SessionError.missingCaptureCharacteristic("target temperature") }
+        guard let batteryData else { throw SessionError.missingCaptureCharacteristic("battery") }
+        guard let liquidStateData else { throw SessionError.missingCaptureCharacteristic("liquid state") }
+
+        let currentTemp = try StatusParsers.parseTemperatureC(from: currentTempData).get()
+        let targetTemp = try StatusParsers.parseTemperatureC(from: targetTempData).get()
+        let battery = try StatusParsers.parseBattery(from: batteryData).get()
+        _ = try StatusParsers.parseLiquidState(from: liquidStateData).get()
+
+        return HardwareRegressionCapture(
+            captureID: captureID,
+            notes: notes,
+            characteristics: HardwareCaptureCharacteristics(
+                currentTemp: currentTempData.hexUppercased(),
+                targetTemp: targetTempData.hexUppercased(),
+                battery: batteryData.hexUppercased(),
+                liquidState: liquidStateData.hexUppercased()
+            ),
+            expected: HardwareCaptureExpected(
+                currentTempC: currentTemp,
+                targetTempC: targetTemp,
+                batteryPercent: battery.percent,
+                isCharging: battery.isCharging,
+                liquidStateRaw: liquidStateData[0]
+            )
+        )
+    }
+
     private func subscribeToNotificationsIfSupported() async throws {
         guard let selectedMug, capabilityMap?.supportsPushEvents == true else { return }
 
@@ -355,3 +396,9 @@ public final class MugSessionCoordinator {
 
 
 extension MugSessionCoordinator: @unchecked Sendable {}
+
+private extension Data {
+    func hexUppercased() -> String {
+        map { String(format: "%02X", $0) }.joined()
+    }
+}

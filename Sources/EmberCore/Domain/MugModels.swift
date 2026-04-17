@@ -23,8 +23,8 @@ public enum LiquidState: Equatable, Sendable {
         switch rawValue {
         case 0, 1: self = .empty
         case 2: self = .filling
-        case 3: self = .cooling
-        case 4: self = .heating
+        case 3, 4: self = .cooling
+        case 6: self = .heating
         default: self = .unknown(rawValue)
         }
     }

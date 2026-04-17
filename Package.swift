@@ -12,6 +12,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "EmberCore"),
-        .testTarget(name: "EmberCoreTests", dependencies: ["EmberCore"])
+        .testTarget(
+            name: "EmberCoreTests",
+            dependencies: ["EmberCore"],
+            resources: [
+                .process("Fixtures")
+            ]
+        )
     ]
 )

@@ -1,0 +1,36 @@
+[
+  {
+    "captureID": "hardware-2026-04-17-064751-idle",
+    "notes": "Mug resting, not charging.",
+    "characteristics": {
+      "battery": "5500080700",
+      "currentTemp": "9E07",
+      "liquidState": "01",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 85,
+      "currentTempC": 19.5,
+      "isCharging": false,
+      "liquidStateRaw": 1,
+      "targetTempC": 55
+    }
+  },
+  {
+    "captureID": "hardware-2026-04-17-065031-cooling",
+    "notes": "Current temp above target temp.",
+    "characteristics": {
+      "battery": "5500080700",
+      "currentTemp": "9619",
+      "liquidState": "04",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 85,
+      "currentTempC": 65.5,
+      "isCharging": false,
+      "liquidStateRaw": 4,
+      "targetTempC": 55
+    }
+  }
+]

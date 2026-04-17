@@ -73,7 +73,7 @@ final class MugSessionCoordinatorIntegrationTests: XCTestCase {
             EmberCharacteristic.currentTemp: Data([0xF4, 0x09]),
             EmberCharacteristic.targetTemp: Data([0x2C, 0x1E]),
             EmberCharacteristic.battery: Data([75, 1]),
-            EmberCharacteristic.liquidState: Data([4])
+            EmberCharacteristic.liquidState: Data([6])
         ])
 
         let coordinator = MugSessionCoordinator(bluetooth: mock)
