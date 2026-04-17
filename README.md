@@ -1,4 +1,4 @@
-# Ember Status (Read-Only)
+# Ember Status
 
 Read-only Ember mug status client with a reusable core library (`EmberCore`) and a UIKit app (`Apps/EmberStatusApp`) for iOS + Mac Catalyst.
 
