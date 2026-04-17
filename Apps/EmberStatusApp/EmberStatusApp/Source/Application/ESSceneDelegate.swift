@@ -10,7 +10,9 @@ class ESSceneDelegate: UIResponder, UIWindowSceneDelegate {
 		window = UIWindow(windowScene: windowScene)
 		
 		if let window = window {
-			let store = ESAppSessionStore()
+			let store = ESAppRuntime.shared.sharedStore()
+			ESAppRuntime.shared.install(store: store)
+			store.setSceneActive(true)
 
 #if targetEnvironment(macCatalyst)
 			window.rootViewController = ESCatalystSplitViewController(store: store)
@@ -33,4 +35,21 @@ class ESSceneDelegate: UIResponder, UIWindowSceneDelegate {
 			window.makeKeyAndVisible()
 		}
 	}
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        ESAppRuntime.shared.store?.setSceneActive(true)
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        ESAppRuntime.shared.store?.setSceneActive(false)
+    }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        ESAppRuntime.shared.store?.setSceneActive(false)
+        (UIApplication.shared.delegate as? ESAppDelegate)?.handleSceneDidEnterBackground()
+    }
+
+    func sceneWillEnterForeground(_ scene: UIScene) {
+        ESAppRuntime.shared.store?.setSceneActive(true)
+    }
 }

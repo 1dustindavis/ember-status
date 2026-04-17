@@ -8,10 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		DA6159D92F90000500848E3A /* EmberCore in Frameworks */ = {isa = PBXBuildFile; productRef = DA6159D82F90000500848E3A /* EmberCore */; };
+		A10000012F91000100848E3A /* EmberStatusLiveActivityExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000112F91000100848E3A /* EmberStatusLiveActivityExtension.appex */; };
+		A10000022F91000100848E3A /* EmberCore in Frameworks */ = {isa = PBXBuildFile; productRef = DA6159D82F90000500848E3A /* EmberCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		DA6159BD2F8FFD6400848E3A /* EmberStatusApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EmberStatusApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000112F91000100848E3A /* EmberStatusLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EmberStatusLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -22,6 +25,13 @@
 			);
 			target = DA6159BC2F8FFD6400848E3A /* EmberStatusApp */;
 		};
+		A10000212F91000100848E3A /* Exceptions for "EmberStatusLiveActivityExtension" folder in "EmberStatusLiveActivityExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A10000512F91000100848E3A /* EmberStatusLiveActivityExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -31,6 +41,14 @@
 				DA6159D12F8FFD6400848E3A /* Exceptions for "EmberStatusApp" folder in "EmberStatusApp" target */,
 			);
 			path = EmberStatusApp;
+			sourceTree = "<group>";
+		};
+		A10000312F91000100848E3A /* EmberStatusLiveActivityExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A10000212F91000100848E3A /* Exceptions for "EmberStatusLiveActivityExtension" folder in "EmberStatusLiveActivityExtension" target */,
+			);
+			path = EmberStatusLiveActivityExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -44,13 +62,36 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000412F91000100848E3A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000022F91000100848E3A /* EmberCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000442F91000100848E3A /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000012F91000100848E3A /* EmberStatusLiveActivityExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXGroup section */
 		DA6159B42F8FFD6400848E3A = {
 			isa = PBXGroup;
 			children = (
 				DA6159BF2F8FFD6400848E3A /* EmberStatusApp */,
+				A10000312F91000100848E3A /* EmberStatusLiveActivityExtension */,
 				DA6159BE2F8FFD6400848E3A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -59,6 +100,7 @@
 			isa = PBXGroup;
 			children = (
 				DA6159BD2F8FFD6400848E3A /* EmberStatusApp.app */,
+				A10000112F91000100848E3A /* EmberStatusLiveActivityExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -72,11 +114,13 @@
 			buildPhases = (
 				DA6159B92F8FFD6400848E3A /* Sources */,
 				DA6159BA2F8FFD6400848E3A /* Frameworks */,
+				A10000442F91000100848E3A /* Embed App Extensions */,
 				DA6159BB2F8FFD6400848E3A /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A10000612F91000100848E3A /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				DA6159BF2F8FFD6400848E3A /* EmberStatusApp */,
@@ -88,6 +132,29 @@
 			productName = EmberStatusApp;
 			productReference = DA6159BD2F8FFD6400848E3A /* EmberStatusApp.app */;
 			productType = "com.apple.product-type.application";
+		};
+		A10000512F91000100848E3A /* EmberStatusLiveActivityExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000812F91000100848E3A /* Build configuration list for PBXNativeTarget "EmberStatusLiveActivityExtension" */;
+			buildPhases = (
+				A10000432F91000100848E3A /* Sources */,
+				A10000412F91000100848E3A /* Frameworks */,
+				A10000422F91000100848E3A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000312F91000100848E3A /* EmberStatusLiveActivityExtension */,
+			);
+			name = EmberStatusLiveActivityExtension;
+			packageProductDependencies = (
+				DA6159D82F90000500848E3A /* EmberCore */,
+			);
+			productName = EmberStatusLiveActivityExtension;
+			productReference = A10000112F91000100848E3A /* EmberStatusLiveActivityExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -101,6 +168,9 @@
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					DA6159BC2F8FFD6400848E3A = {
+						CreatedOnToolsVersion = 26.4;
+					};
+					A10000512F91000100848E3A = {
 						CreatedOnToolsVersion = 26.4;
 					};
 				};
@@ -123,12 +193,30 @@
 			projectRoot = "";
 			targets = (
 				DA6159BC2F8FFD6400848E3A /* EmberStatusApp */,
+				A10000512F91000100848E3A /* EmberStatusLiveActivityExtension */,
 			);
 		};
 /* End PBXProject section */
 
+/* Begin PBXContainerItemProxy section */
+		A10000622F91000100848E3A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DA6159B52F8FFD6400848E3A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000512F91000100848E3A;
+			remoteInfo = EmberStatusLiveActivityExtension;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXResourcesBuildPhase section */
 		DA6159BB2F8FFD6400848E3A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000422F91000100848E3A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -145,7 +233,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000432F91000100848E3A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A10000612F91000100848E3A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000512F91000100848E3A /* EmberStatusLiveActivityExtension */;
+			targetProxy = A10000622F91000100848E3A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		DA6159D32F8FFD6400848E3A /* Debug */ = {
@@ -219,6 +322,81 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,6,7";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A10000712F91000100848E3A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = P79DSL27VK;
+				GCC_TREAT_WARNINGS_AS_ERRORS = deep;
+				GCC_WARN_PEDANTIC = deep;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = EmberStatusLiveActivityExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.github.1dustindavis.EmberStatusApp.LiveActivityExtension;
+				PRODUCT_NAME = EmberStatusLiveActivityExtension;
+				RUN_CLANG_STATIC_ANALYZER = YES;
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A10000722F91000100848E3A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = P79DSL27VK;
+				GCC_TREAT_WARNINGS_AS_ERRORS = deep;
+				GCC_WARN_PEDANTIC = deep;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = EmberStatusLiveActivityExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.github.1dustindavis.EmberStatusApp.LiveActivityExtension;
+				PRODUCT_NAME = EmberStatusLiveActivityExtension;
+				RUN_CLANG_STATIC_ANALYZER = YES;
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -358,6 +536,15 @@
 			buildConfigurations = (
 				DA6159D32F8FFD6400848E3A /* Debug */,
 				DA6159D42F8FFD6400848E3A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000812F91000100848E3A /* Build configuration list for PBXNativeTarget "EmberStatusLiveActivityExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000712F91000100848E3A /* Debug */,
+				A10000722F91000100848E3A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

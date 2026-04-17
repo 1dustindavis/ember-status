@@ -1,6 +1,283 @@
 import UIKit
 import EmberCore
 import OSLog
+#if os(iOS) && !targetEnvironment(macCatalyst)
+import BackgroundTasks
+#endif
+#if canImport(ActivityKit) && os(iOS) && !targetEnvironment(macCatalyst)
+import ActivityKit
+#endif
+
+enum ESBackgroundRefresh {
+    static let taskIdentifier = "com.github.1dustindavis.EmberStatusApp.refresh"
+    static let fastInterval: TimeInterval = 60
+    static let slowInterval: TimeInterval = 15 * 60
+}
+
+@MainActor
+final class ESAppRuntime {
+    static let shared = ESAppRuntime()
+    private(set) var store: ESAppSessionStore?
+
+    func sharedStore() -> ESAppSessionStore {
+        if let store {
+            return store
+        }
+        let store = ESAppSessionStore()
+        self.store = store
+        return store
+    }
+
+    func install(store: ESAppSessionStore) {
+        self.store = store
+    }
+}
+
+fileprivate enum ESRefreshReason: String {
+    case manual
+    case foregroundTimer
+    case foregroundActivation
+    case backgroundTask
+}
+
+@MainActor
+private final class ESRefreshOrchestrator {
+    private weak var store: ESAppSessionStore?
+    private var pollingTask: Task<Void, Never>?
+    private var tickerTask: Task<Void, Never>?
+    private var isSceneActive = true
+
+    init(store: ESAppSessionStore) {
+        self.store = store
+    }
+
+    @MainActor
+    deinit {
+        stop()
+    }
+
+    func start() {
+        startPollingLoop()
+        startTickerLoop()
+    }
+
+    func stop() {
+        pollingTask?.cancel()
+        pollingTask = nil
+        tickerTask?.cancel()
+        tickerTask = nil
+    }
+
+    func setSceneActive(_ isActive: Bool) {
+        isSceneActive = isActive
+        if isActive {
+            start()
+            triggerImmediateRefresh(reason: .foregroundActivation)
+        }
+    }
+
+    func triggerImmediateRefresh(reason: ESRefreshReason) {
+        Task { @MainActor [weak self] in
+            guard let self, let store else { return }
+            _ = await store.runManagedRefresh(reason: reason)
+        }
+    }
+
+    private func startPollingLoop() {
+        if pollingTask != nil { return }
+        pollingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pollingTask = nil }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard !Task.isCancelled, isSceneActive, let store else { continue }
+                _ = await store.runManagedRefresh(reason: .foregroundTimer)
+            }
+        }
+    }
+
+    private func startTickerLoop() {
+        if tickerTask != nil { return }
+        tickerTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.tickerTask = nil }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, isSceneActive, let store else { continue }
+                await store.handleFreshnessTick(now: Date())
+            }
+        }
+    }
+}
+
+#if canImport(ActivityKit) && os(iOS) && !targetEnvironment(macCatalyst)
+@MainActor
+private final class ESMugActivityManager {
+    private struct MaterialState: Equatable {
+        var liquidState: String
+        var currentTempC: Double?
+        var batteryPercent: Int?
+        var isCharging: Bool?
+        var lastUpdatedAt: Date
+    }
+
+    private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "LiveActivity")
+    private let defaults = UserDefaults.standard
+    private let managedActivityIDDefaultsKey = "es.liveActivity.managedID"
+    private var activity: Activity<EmberMugActivityAttributes>?
+    private let staleCutoffSeconds = 5 * 60
+    private var lastPublishedMaterialState: MaterialState?
+    private var lastShouldShow: Bool?
+    private var didInitialCleanup = false
+
+    func handle(snapshot: MugSessionCoordinator.Snapshot, secondsSinceLastUpdate: Int) async {
+        await updateActivity(snapshot: snapshot, secondsSinceLastUpdate: secondsSinceLastUpdate)
+    }
+
+    private func updateActivity(snapshot: MugSessionCoordinator.Snapshot, secondsSinceLastUpdate: Int) async {
+        await performInitialCleanupIfNeeded()
+
+        let connected = snapshot.status.connectionState == .connected
+        let activeLiquid = isActiveLiquid(snapshot.status.liquidState)
+        let isFreshEnough = secondsSinceLastUpdate <= staleCutoffSeconds
+        let shouldShow = connected && activeLiquid && isFreshEnough
+
+        guard shouldShow else {
+            if lastShouldShow != false {
+                logger.notice("[LiveActivity] skipped connected=\(connected) activeLiquid=\(activeLiquid) fresh=\(isFreshEnough) secondsSinceLastUpdate=\(secondsSinceLastUpdate)")
+            }
+            lastShouldShow = false
+            await endActivityIfNeeded()
+            return
+        }
+        lastShouldShow = true
+
+        if activity == nil {
+            let existing = Activity<EmberMugActivityAttributes>.activities
+            let savedManagedID = defaults.string(forKey: managedActivityIDDefaultsKey)
+
+            if let savedManagedID,
+               let restored = existing.first(where: { $0.id == savedManagedID }) {
+                activity = restored
+                logger.notice("[LiveActivity] restored managed id=\(restored.id, privacy: .public)")
+            } else if existing.count == 1 {
+                activity = existing.first
+                if let restored = activity {
+                    logger.notice("[LiveActivity] restored single existing id=\(restored.id, privacy: .public)")
+                }
+            } else if !existing.isEmpty {
+                for existing in existing {
+                    logger.notice("[LiveActivity] ending stale unknown id=\(existing.id, privacy: .public)")
+                    await existing.end(nil, dismissalPolicy: .immediate)
+                }
+                defaults.removeObject(forKey: managedActivityIDDefaultsKey)
+            }
+        }
+
+        await endExtraActivitiesKeepingCurrent()
+
+        let mugName = snapshot.identity?.name ?? "Ember Mug"
+        let contentState = EmberMugActivityAttributes.ContentState(
+            liquidState: snapshot.status.liquidState?.displayName ?? "Unknown",
+            currentTempC: snapshot.status.currentTempC,
+            batteryPercent: snapshot.status.batteryPercent,
+            isCharging: snapshot.status.isCharging,
+            secondsSinceLastUpdate: secondsSinceLastUpdate,
+            lastUpdatedAt: snapshot.status.lastUpdated
+        )
+        let materialState = MaterialState(
+            liquidState: contentState.liquidState,
+            currentTempC: contentState.currentTempC,
+            batteryPercent: contentState.batteryPercent,
+            isCharging: contentState.isCharging,
+            lastUpdatedAt: contentState.lastUpdatedAt
+        )
+        let contentChanged = (lastPublishedMaterialState != materialState)
+
+        do {
+            let staleDate = snapshot.status.lastUpdated.addingTimeInterval(TimeInterval(staleCutoffSeconds))
+            let content = ActivityContent(state: contentState, staleDate: staleDate)
+            if let activity {
+                if contentChanged {
+                    await activity.update(content)
+                    lastPublishedMaterialState = materialState
+                    defaults.set(activity.id, forKey: managedActivityIDDefaultsKey)
+                    logger.notice("[LiveActivity] updated id=\(activity.id, privacy: .public) liquid=\(contentState.liquidState, privacy: .public)")
+                }
+            } else {
+                let attributes = EmberMugActivityAttributes(mugName: mugName)
+                activity = try Activity.request(attributes: attributes, content: content, pushType: nil)
+                if let activity {
+                    lastPublishedMaterialState = materialState
+                    defaults.set(activity.id, forKey: managedActivityIDDefaultsKey)
+                    logger.notice("[LiveActivity] started id=\(activity.id, privacy: .public) mug=\(mugName, privacy: .public)")
+                }
+            }
+        } catch {
+            logger.error("[LiveActivity] update failed error=\(error.localizedDescription)")
+        }
+    }
+
+    private func isActiveLiquid(_ value: LiquidState?) -> Bool {
+        guard let value else { return false }
+        switch value {
+        case .heating, .cooling:
+            return true
+        case .empty, .filling, .unknown:
+            return false
+        }
+    }
+
+    private func endActivityIfNeeded() async {
+        if let activity {
+            logger.notice("[LiveActivity] ending current id=\(activity.id, privacy: .public)")
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        await endExtraActivitiesKeepingCurrent()
+        self.activity = nil
+        self.lastPublishedMaterialState = nil
+        defaults.removeObject(forKey: managedActivityIDDefaultsKey)
+    }
+
+    private func endExtraActivitiesKeepingCurrent() async {
+        for existing in Activity<EmberMugActivityAttributes>.activities where existing.id != activity?.id {
+            logger.notice("[LiveActivity] ending extra id=\(existing.id, privacy: .public)")
+            await existing.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
+    private func performInitialCleanupIfNeeded() async {
+        guard !didInitialCleanup else { return }
+        didInitialCleanup = true
+
+        let existing = Activity<EmberMugActivityAttributes>.activities
+        if existing.isEmpty {
+            defaults.removeObject(forKey: managedActivityIDDefaultsKey)
+            return
+        }
+
+        logger.notice("[LiveActivity] initial cleanup count=\(existing.count, privacy: .public)")
+        for stale in existing {
+            logger.notice("[LiveActivity] initial cleanup ending id=\(stale.id, privacy: .public)")
+            await stale.end(nil, dismissalPolicy: .immediate)
+        }
+        activity = nil
+        lastPublishedMaterialState = nil
+        defaults.removeObject(forKey: managedActivityIDDefaultsKey)
+    }
+
+    func forceEnd() {
+        Task { @MainActor in
+            await self.endActivityIfNeeded()
+        }
+    }
+}
+#else
+@MainActor
+private final class ESMugActivityManager {
+    func handle(snapshot: MugSessionCoordinator.Snapshot, secondsSinceLastUpdate: Int) async {}
+}
+#endif
 
 @MainActor
 final class ESAppSessionStore {
@@ -14,15 +291,23 @@ final class ESAppSessionStore {
         var capturedFixtureCount: Int
         var lastCapturedFixtureID: String?
         var captureGroupsSummary: String
+        var secondsSinceLastUpdate: Int
+        var isStatusStale: Bool
+        var lastRefreshAttempt: Date?
+        var lastRefreshSucceededAt: Date?
+        var lastRefreshErrorMessage: String?
     }
 
     private enum ViewError: Error, LocalizedError {
         case scanTimedOut
+        case refreshTimedOut
 
         var errorDescription: String? {
             switch self {
             case .scanTimedOut:
                 return "Scan timed out. Please try again."
+            case .refreshTimedOut:
+                return "Refresh timed out. Please try again."
             }
         }
     }
@@ -48,6 +333,18 @@ final class ESAppSessionStore {
     private let defaults: UserDefaults
     private let logger = Logger(subsystem: "com.github.1dustindavis.EmberStatusApp", category: "SessionStore")
     private var autoConnectTask: Task<Void, Never>?
+    private var backgroundRefreshTask: Task<Bool, Never>?
+    private var isRefreshInFlight = false
+    private var disconnectedRefreshFailures = 0
+    private lazy var refreshOrchestrator = ESRefreshOrchestrator(store: self)
+    private let activityManager = ESMugActivityManager()
+    private let staleThresholdSeconds = 60
+    private let refreshTimeoutSeconds = 20.0
+
+    var didRefresh: ((Date) -> Void)?
+    var didFailRefresh: ((Error) -> Void)?
+    var didTransitionLiquidState: ((LiquidState?, LiquidState?) -> Void)?
+
     private struct CapturedFixtureRecord {
         let stateLabel: String
         let sampleIndex: Int
@@ -78,28 +375,50 @@ final class ESAppSessionStore {
             preferredAutoConnectMugID: UUID(uuidString: defaults.string(forKey: DefaultsKey.preferredMugID) ?? ""),
             capturedFixtureCount: 0,
             lastCapturedFixtureID: nil,
-            captureGroupsSummary: "--"
+            captureGroupsSummary: "--",
+            secondsSinceLastUpdate: 0,
+            isStatusStale: false,
+            lastRefreshAttempt: nil,
+            lastRefreshSucceededAt: nil,
+            lastRefreshErrorMessage: nil
         )
 
         coordinator.onSnapshotChanged = { [weak self] next in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                let previousLiquidState = self.viewState.snapshot.status.liquidState
                 self.viewState.snapshot = next
+                self.updateFreshnessMetadata(now: Date())
+                if previousLiquidState != next.status.liquidState {
+                    self.didTransitionLiquidState?(previousLiquidState, next.status.liquidState)
+                }
+                await self.activityManager.handle(snapshot: next, secondsSinceLastUpdate: self.viewState.secondsSinceLastUpdate)
                 let selectedID = next.identity?.id.uuidString ?? "none"
                 self.logger.debug("[Store] snapshot updated state=\(String(describing: next.status.connectionState)) selected=\(selectedID)")
             }
         }
         coordinator.startConnectionEventListening()
+        refreshOrchestrator.start()
+        updateFreshnessMetadata(now: Date())
+        Task { @MainActor in
+            await self.activityManager.handle(
+                snapshot: self.coordinator.snapshot,
+                secondsSinceLastUpdate: self.viewState.secondsSinceLastUpdate
+            )
+        }
 
         if viewState.autoConnectEnabled {
             startAutoConnectIfNeeded()
         }
     }
 
+    @MainActor
     deinit {
         coordinator.stopConnectionEventListening()
         coordinator.onSnapshotChanged = nil
         autoConnectTask?.cancel()
+        backgroundRefreshTask?.cancel()
+        refreshOrchestrator.stop()
     }
 
     func addObserver(_ observer: @escaping (ViewState) -> Void) -> UUID {
@@ -160,16 +479,91 @@ final class ESAppSessionStore {
     }
 
     func refresh() {
-        Task {
-            do {
-                try await coordinator.refresh()
-                viewState.lastErrorMessage = nil
-                logger.notice("[Store] refresh succeeded")
-            } catch {
-                viewState.lastErrorMessage = error.localizedDescription
-                logger.error("[Store] refresh failed error=\(error.localizedDescription)")
-            }
+        refreshOrchestrator.triggerImmediateRefresh(reason: .manual)
+    }
+
+    func setSceneActive(_ isActive: Bool) {
+        logger.notice("[Store] scene active=\(isActive)")
+        refreshOrchestrator.setSceneActive(isActive)
+        if !isActive {
+            cancelBackgroundRefreshIfNeeded()
+            scheduleBackgroundRefresh()
         }
+    }
+
+    func handleFreshnessTick(now: Date = Date()) async {
+        updateFreshnessMetadata(now: now)
+        await activityManager.handle(snapshot: viewState.snapshot, secondsSinceLastUpdate: viewState.secondsSinceLastUpdate)
+    }
+
+    @discardableResult
+    fileprivate func runManagedRefresh(reason: ESRefreshReason) async -> Bool {
+        guard !isRefreshInFlight else {
+            logger.notice("[Store] refresh skipped reason=\(reason.rawValue, privacy: .public) inFlight=true")
+            return false
+        }
+
+        isRefreshInFlight = true
+        viewState.lastRefreshAttempt = Date()
+
+        defer {
+            isRefreshInFlight = false
+            updateFreshnessMetadata(now: Date())
+        }
+
+        guard !Task.isCancelled else { return false }
+
+        do {
+            if coordinator.status.connectionState != .connected {
+                guard await reconnectForManagedRefreshIfNeeded() else {
+                    throw AutoConnectError.mugNotFound
+                }
+            }
+
+            try await withTimeout(seconds: refreshTimeoutSeconds, timeoutError: ViewError.refreshTimedOut) {
+                try await self.coordinator.refresh()
+            }
+            let refreshedAt = Date()
+            viewState.lastErrorMessage = nil
+            viewState.lastRefreshSucceededAt = refreshedAt
+            viewState.lastRefreshErrorMessage = nil
+            disconnectedRefreshFailures = 0
+            await activityManager.handle(snapshot: coordinator.snapshot, secondsSinceLastUpdate: viewState.secondsSinceLastUpdate)
+            didRefresh?(refreshedAt)
+            logger.notice("[Store] refresh succeeded reason=\(reason.rawValue, privacy: .public)")
+            scheduleBackgroundRefresh()
+            return true
+        } catch {
+            viewState.lastErrorMessage = error.localizedDescription
+            viewState.lastRefreshErrorMessage = error.localizedDescription
+            if coordinator.status.connectionState != .connected {
+                disconnectedRefreshFailures += 1
+                if disconnectedRefreshFailures >= 3 {
+                    activityManager.forceEnd()
+                }
+            } else {
+                disconnectedRefreshFailures = 0
+            }
+            didFailRefresh?(error)
+            logger.error("[Store] refresh failed reason=\(reason.rawValue, privacy: .public) error=\(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func performBackgroundRefresh() async -> Bool {
+        backgroundRefreshTask?.cancel()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            return await self.runManagedRefresh(reason: .backgroundTask)
+        }
+        backgroundRefreshTask = task
+        let success = await task.value
+        backgroundRefreshTask = nil
+        return success
+    }
+
+    func cancelBackgroundRefreshIfNeeded() {
+        backgroundRefreshTask?.cancel()
     }
 
     func setAutoConnectEnabled(_ isEnabled: Bool) {
@@ -301,6 +695,12 @@ final class ESAppSessionStore {
             .joined(separator: ", ")
     }
 
+    private func updateFreshnessMetadata(now: Date) {
+        let seconds = max(0, Int(now.timeIntervalSince(viewState.snapshot.status.lastUpdated)))
+        viewState.secondsSinceLastUpdate = seconds
+        viewState.isStatusStale = seconds >= staleThresholdSeconds
+    }
+
     private func startAutoConnectIfNeeded() {
         guard viewState.autoConnectEnabled else { return }
         guard let preferredID = viewState.preferredAutoConnectMugID else { return }
@@ -313,14 +713,29 @@ final class ESAppSessionStore {
         autoConnectTask?.cancel()
         autoConnectTask = Task { [weak self] in
             guard let self else { return }
-            await self.runAutoConnectFlow(for: preferredID)
+            _ = await self.runAutoConnectFlow(for: preferredID)
         }
     }
 
-    private func runAutoConnectFlow(for preferredID: UUID) async {
-        let maxAttempts = 3
+    private func runAutoConnectFlow(for preferredID: UUID, maxAttempts: Int = 3) async -> Bool {
+        let preferredIdentity = MugIdentity(
+            id: preferredID,
+            name: (viewState.snapshot.identity?.id == preferredID ? viewState.snapshot.identity?.name : nil)
+        )
+
+        // Fast path: if CoreBluetooth can resolve the peripheral by identifier,
+        // this avoids a full scan cycle and reconnects more quickly.
+        do {
+            try await coordinator.connect(to: preferredIdentity)
+            viewState.lastErrorMessage = nil
+            logger.notice("[Store] auto-connect direct succeeded id=\(preferredID.uuidString)")
+            return true
+        } catch {
+            logger.notice("[Store] auto-connect direct failed id=\(preferredID.uuidString) error=\(error.localizedDescription)")
+        }
+
         for attempt in 1...maxAttempts {
-            if Task.isCancelled { return }
+            if Task.isCancelled { return false }
 
             do {
                 let devices = try await withTimeout(seconds: 12) {
@@ -335,7 +750,7 @@ final class ESAppSessionStore {
                 try await self.coordinator.connect(to: mug)
                 self.viewState.lastErrorMessage = nil
                 self.logger.notice("[Store] auto-connect succeeded attempt=\(attempt) id=\(preferredID.uuidString)")
-                return
+                return true
             } catch {
                 self.viewState.lastErrorMessage = "Auto-connect attempt \(attempt) failed: \(error.localizedDescription)"
                 self.logger.error("[Store] auto-connect failed attempt=\(attempt) id=\(preferredID.uuidString) error=\(error.localizedDescription)")
@@ -344,6 +759,49 @@ final class ESAppSessionStore {
                 }
             }
         }
+        return false
+    }
+
+    private func reconnectForManagedRefreshIfNeeded() async -> Bool {
+        guard coordinator.status.connectionState != .connected else {
+            return true
+        }
+
+        guard let preferredID = viewState.preferredAutoConnectMugID ?? viewState.snapshot.identity?.id else {
+            return false
+        }
+
+        return await runAutoConnectFlow(for: preferredID, maxAttempts: 2)
+    }
+
+    func recommendedBackgroundRefreshInterval() -> TimeInterval {
+        let status = viewState.snapshot.status
+        let isConnected = status.connectionState == .connected
+        let isThermallyActive: Bool
+        switch status.liquidState {
+        case .heating?, .cooling?:
+            isThermallyActive = true
+        default:
+            isThermallyActive = false
+        }
+        return (isConnected && isThermallyActive) ? ESBackgroundRefresh.fastInterval : ESBackgroundRefresh.slowInterval
+    }
+
+    func shouldRunExtendedBackgroundRefreshLoop() -> Bool {
+        let status = viewState.snapshot.status
+        guard status.connectionState == .connected else { return false }
+        switch status.liquidState {
+        case .heating?, .cooling?:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func scheduleBackgroundRefresh() {
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        ESAppDelegate.scheduleBackgroundRefreshTask(earliestIn: recommendedBackgroundRefreshInterval())
+#endif
     }
 
     private func setPreferredAutoConnectMug(id: UUID) {
@@ -360,6 +818,7 @@ final class ESAppSessionStore {
 
     private func withTimeout<T: Sendable>(
         seconds: Double,
+        timeoutError: Error = ViewError.scanTimedOut,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
@@ -368,11 +827,11 @@ final class ESAppSessionStore {
             }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw ViewError.scanTimedOut
+                throw timeoutError
             }
 
             guard let first = try await group.next() else {
-                throw ViewError.scanTimedOut
+                throw timeoutError
             }
             group.cancelAll()
             return first
@@ -384,6 +843,7 @@ final class ESMainViewController: UIViewController {
     private var store: ESAppSessionStore?
     private var observerToken: UUID?
     private var lastErrorMessage: String?
+    private var secondsSinceLastUpdate = 0
     private var snapshot = MugSessionCoordinator.Snapshot(
         identity: nil,
         status: MugStatus(),
@@ -420,6 +880,11 @@ final class ESMainViewController: UIViewController {
         view.backgroundColor = .systemBackground
         configureUI()
         bindStoreIfNeeded()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        store?.setSceneActive(true)
     }
 
     private func configureUI() {
@@ -487,6 +952,7 @@ final class ESMainViewController: UIViewController {
         observerToken = store.addObserver { [weak self] state in
             self?.snapshot = state.snapshot
             self?.lastErrorMessage = state.lastErrorMessage
+            self?.secondsSinceLastUpdate = state.secondsSinceLastUpdate
             self?.renderSnapshot()
         }
     }
@@ -500,7 +966,7 @@ final class ESMainViewController: UIViewController {
             DetailRow(title: "Target Temp", value: formattedTemperature(snapshot.status.targetTempC)),
             DetailRow(title: "Battery", value: snapshot.status.batteryPercent.map { "\($0)%" } ?? "--"),
             DetailRow(title: "Charging", value: snapshot.status.isCharging.map { $0 ? "Yes" : "No" } ?? "--"),
-            DetailRow(title: "Updated", value: formattedUpdated(snapshot.status.lastUpdated))
+            DetailRow(title: "Updated", value: formattedUpdated(secondsSinceLastUpdate))
         ]
         parseWarningsLabel.text = "Parse warnings: \(snapshot.diagnostics.parseWarnings.count)"
         lastErrorLabel.text = "Last error: \(lastErrorMessage ?? "--")"
@@ -518,8 +984,7 @@ final class ESMainViewController: UIViewController {
         return value.displayName
     }
 
-    private func formattedUpdated(_ date: Date) -> String {
-        let elapsedSeconds = max(0, Int(Date().timeIntervalSince(date)))
+    private func formattedUpdated(_ elapsedSeconds: Int) -> String {
         if elapsedSeconds < 60 {
             return "\(elapsedSeconds) sec ago"
         }
@@ -591,6 +1056,10 @@ final class ESConnectionViewController: UIViewController {
     private var capturedFixtureCount = 0
     private var lastCapturedFixtureID: String?
     private var captureGroupsSummary = "--"
+    private var isStatusStale = false
+    private var lastRefreshAttempt: Date?
+    private var lastRefreshSucceededAt: Date?
+    private var lastRefreshErrorMessage: String?
     private var rows: [DetailRow] = []
 
     private let autoConnectSwitch = UISwitch()
@@ -643,6 +1112,11 @@ final class ESConnectionViewController: UIViewController {
         bindStoreIfNeeded()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        store?.setSceneActive(true)
+    }
+
     private func configureUI() {
         navigationItem.rightBarButtonItems = [scanBarButtonItem, captureBarButtonItem, exportBarButtonItem]
         navigationItem.leftBarButtonItems = [connectBarButtonItem, disconnectBarButtonItem]
@@ -681,6 +1155,10 @@ final class ESConnectionViewController: UIViewController {
             self.capturedFixtureCount = state.capturedFixtureCount
             self.lastCapturedFixtureID = state.lastCapturedFixtureID
             self.captureGroupsSummary = state.captureGroupsSummary
+            self.isStatusStale = state.isStatusStale
+            self.lastRefreshAttempt = state.lastRefreshAttempt
+            self.lastRefreshSucceededAt = state.lastRefreshSucceededAt
+            self.lastRefreshErrorMessage = state.lastRefreshErrorMessage
             self.renderState()
         }
     }
@@ -702,6 +1180,10 @@ final class ESConnectionViewController: UIViewController {
             DetailRow(title: "Captured Fixtures", value: "\(capturedFixtureCount)"),
             DetailRow(title: "Capture Groups", value: captureGroupsSummary),
             DetailRow(title: "Last Capture ID", value: lastCapturedFixtureID ?? "--"),
+            DetailRow(title: "Status Freshness", value: isStatusStale ? "Stale" : "Fresh"),
+            DetailRow(title: "Last Refresh Attempt", value: formattedTimestamp(lastRefreshAttempt)),
+            DetailRow(title: "Last Refresh Success", value: formattedTimestamp(lastRefreshSucceededAt)),
+            DetailRow(title: "Last Refresh Error", value: lastRefreshErrorMessage ?? "--"),
             DetailRow(title: "Last Error", value: lastErrorMessage ?? "--"),
             DetailRow(title: "Last Event", value: snapshot.diagnostics.connectionEvents.last?.message ?? "--")
         ]
@@ -716,6 +1198,14 @@ final class ESConnectionViewController: UIViewController {
         disconnectBarButtonItem.isEnabled = snapshot.identity != nil
         captureBarButtonItem.isEnabled = snapshot.status.connectionState == .connected
         exportBarButtonItem.isEnabled = capturedFixtureCount > 0
+    }
+
+    private func formattedTimestamp(_ date: Date?) -> String {
+        guard let date else { return "--" }
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        formatter.dateStyle = .none
+        return formatter.string(from: date)
     }
 
     @objc

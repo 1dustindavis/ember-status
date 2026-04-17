@@ -8,6 +8,17 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Ember Status uses Bluetooth to discover and read data from your Ember mug.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.github.1dustindavis.EmberStatusApp.refresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
