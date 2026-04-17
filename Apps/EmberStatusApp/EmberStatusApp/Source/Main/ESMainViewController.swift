@@ -387,7 +387,8 @@ final class ESMainViewController: UIViewController {
             DetailRow(title: "Current Temp", value: formattedTemperature(snapshot.status.currentTempC)),
             DetailRow(title: "Target Temp", value: formattedTemperature(snapshot.status.targetTempC)),
             DetailRow(title: "Battery", value: snapshot.status.batteryPercent.map { "\($0)%" } ?? "--"),
-            DetailRow(title: "Charging", value: snapshot.status.isCharging.map { $0 ? "Yes" : "No" } ?? "--")
+            DetailRow(title: "Charging", value: snapshot.status.isCharging.map { $0 ? "Yes" : "No" } ?? "--"),
+            DetailRow(title: "Updated", value: formattedUpdated(snapshot.status.lastUpdated))
         ]
         parseWarningsLabel.text = "Parse warnings: \(snapshot.diagnostics.parseWarnings.count)"
         lastErrorLabel.text = "Last error: \(lastErrorMessage ?? "--")"
@@ -403,6 +404,28 @@ final class ESMainViewController: UIViewController {
     private func formattedLiquidState(_ value: LiquidState?) -> String {
         guard let value else { return "--" }
         return value.displayName
+    }
+
+    private func formattedUpdated(_ date: Date) -> String {
+        let elapsedSeconds = max(0, Int(Date().timeIntervalSince(date)))
+        if elapsedSeconds < 60 {
+            return "\(elapsedSeconds) sec ago"
+        }
+
+        let elapsedMinutes = elapsedSeconds / 60
+        if elapsedMinutes < 60 {
+            return "\(elapsedMinutes) min ago"
+        }
+
+        let elapsedHours = elapsedMinutes / 60
+        if elapsedHours < 24 {
+            let unit = elapsedHours == 1 ? "hour" : "hours"
+            return "\(elapsedHours) \(unit) ago"
+        }
+
+        let elapsedDays = elapsedHours / 24
+        let unit = elapsedDays == 1 ? "day" : "days"
+        return "\(elapsedDays) \(unit) ago"
     }
 
     @objc
@@ -533,8 +556,16 @@ final class ESConnectionViewController: UIViewController {
     }
 
     private func renderState() {
+        let rssiValue: String
+        if let rssi = snapshot.identity?.rssi {
+            rssiValue = "\(rssi) dBm"
+        } else {
+            rssiValue = "--"
+        }
+
         rows = [
             DetailRow(title: "Selected Mug", value: snapshot.identity?.name ?? "None"),
+            DetailRow(title: "RSSI", value: rssiValue),
             DetailRow(title: "Connection", value: String(describing: snapshot.status.connectionState).capitalized),
             DetailRow(title: "Discovered Mugs", value: "\(discoveredMugs.count)"),
             DetailRow(title: "Preferred Mug", value: preferredMugText),
