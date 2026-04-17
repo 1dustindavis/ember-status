@@ -21,7 +21,7 @@ final class MugStatusReducerTests: XCTestCase {
         XCTAssertEqual(next.targetTempC, 77.24)
         XCTAssertEqual(next.batteryPercent, 88)
         XCTAssertEqual(next.isCharging, false)
-        XCTAssertEqual(next.liquidState, .heating)
+        XCTAssertEqual(next.liquidState, .atTargetHold)
         XCTAssertEqual(next.lastUpdated, now)
     }
 

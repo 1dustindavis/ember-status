@@ -88,7 +88,7 @@ final class MugSessionCoordinatorIntegrationTests: XCTestCase {
         XCTAssertEqual(coordinator.status.targetTempC, 77.24)
         XCTAssertEqual(coordinator.status.batteryPercent, 75)
         XCTAssertEqual(coordinator.status.isCharging, true)
-        XCTAssertEqual(coordinator.status.liquidState, .heating)
+        XCTAssertEqual(coordinator.status.liquidState, .atTargetHold)
     }
 
     func testUnexpectedDisconnectAttemptsReconnect() async throws {

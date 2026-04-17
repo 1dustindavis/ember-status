@@ -17,6 +17,7 @@ public enum LiquidState: Equatable, Sendable {
     case filling
     case cooling
     case heating
+    case atTargetHold
     case unknown(UInt8)
 
     public init(rawValue: UInt8) {
@@ -24,7 +25,8 @@ public enum LiquidState: Equatable, Sendable {
         case 0, 1: self = .empty
         case 2: self = .filling
         case 3, 4: self = .cooling
-        case 6: self = .heating
+        case 5: self = .heating
+        case 6: self = .atTargetHold
         default: self = .unknown(rawValue)
         }
     }
@@ -35,6 +37,7 @@ public enum LiquidState: Equatable, Sendable {
         case .filling: return "Filling"
         case .cooling: return "Cooling"
         case .heating: return "Heating"
+        case .atTargetHold: return "At Target"
         case .unknown(let value): return "Unknown (\(value))"
         }
     }

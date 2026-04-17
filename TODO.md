@@ -6,12 +6,12 @@ This checklist tracks real Ember hardware states we still need to capture for ro
 - [x] `idle-empty`
 - [x] `overshoot-cooling`
 - [x] `heating`
+- [x] `at-target-hold`
 
 ## Still Needed
 - [ ] `idle-with-liquid`
 - [ ] `heating-ramp-low`
 - [ ] `heating-ramp-mid`
-- [ ] `at-target-hold`
 - [ ] `charging-idle`
 - [ ] `charging-heating` (if observed)
 - [ ] `low-battery-idle` (<20%)
@@ -29,4 +29,5 @@ Current interpretation from observed hardware captures:
 - `0x01` -> `empty`
 - `0x03` -> `cooling`
 - `0x04` -> `cooling`
-- `0x06` -> `heating`
+- `0x05` -> `heating`
+- `0x06` -> `at-target-hold`

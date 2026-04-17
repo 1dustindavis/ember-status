@@ -48,6 +48,7 @@ final class StatusParsersTests: XCTestCase {
         XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([2])).get(), .filling)
         XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([3])).get(), .cooling)
         XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([4])).get(), .cooling)
-        XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([6])).get(), .heating)
+        XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([5])).get(), .heating)
+        XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([6])).get(), .atTargetHold)
     }
 }
