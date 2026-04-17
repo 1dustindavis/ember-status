@@ -279,30 +279,20 @@ final class ESMainViewController: UIViewController {
         capabilityMap: nil
     )
 
-    private let nameLabel = UILabel()
-    private let connectionLabel = UILabel()
-    private let liquidStateLabel = UILabel()
-    private let currentTempLabel = UILabel()
-    private let targetTempLabel = UILabel()
-    private let batteryLabel = UILabel()
-    private let chargingLabel = UILabel()
-    private let warningLabel = UILabel()
+    private struct DetailRow {
+        let title: String
+        let value: String
+    }
+
+    private let navTitleLabel = UILabel()
+    private let navSubtitleLabel = UILabel()
+    private let navTitleStack = UIStackView()
+    private let tableView = UITableView(frame: .zero, style: .plain)
+    private let diagnosticsStack = UIStackView()
+    private let parseWarningsLabel = UILabel()
     private let lastErrorLabel = UILabel()
     private let lastEventLabel = UILabel()
-    private let refreshButton = UIButton(type: .system)
-
-    private lazy var labels: [UILabel] = [
-        nameLabel,
-        connectionLabel,
-        liquidStateLabel,
-        currentTempLabel,
-        targetTempLabel,
-        batteryLabel,
-        chargingLabel,
-        warningLabel,
-        lastErrorLabel,
-        lastEventLabel
-    ]
+    private var rows: [DetailRow] = []
 
     init(store: ESAppSessionStore) {
         self.store = store
@@ -315,30 +305,69 @@ final class ESMainViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Status"
         view.backgroundColor = .systemBackground
         configureUI()
         bindStoreIfNeeded()
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        layoutSubviewsManually()
-    }
-
     private func configureUI() {
-        labels.forEach { label in
-            label.numberOfLines = 1
-            label.font = .preferredFont(forTextStyle: .body)
-            view.addSubview(label)
-        }
-        nameLabel.font = .preferredFont(forTextStyle: .headline)
-        lastErrorLabel.font = .preferredFont(forTextStyle: .caption1)
-        lastEventLabel.font = .preferredFont(forTextStyle: .caption1)
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .refresh,
+            target: self,
+            action: #selector(refreshTapped)
+        )
 
-        refreshButton.setTitle("Refresh", for: .normal)
-        refreshButton.addTarget(self, action: #selector(refreshTapped), for: .touchUpInside)
-        view.addSubview(refreshButton)
+        navTitleLabel.font = .preferredFont(forTextStyle: .headline)
+        navTitleLabel.textAlignment = .center
+        navTitleLabel.textColor = .label
+        navTitleLabel.numberOfLines = 1
+
+        navSubtitleLabel.font = .preferredFont(forTextStyle: .caption1)
+        navSubtitleLabel.textAlignment = .center
+        navSubtitleLabel.textColor = .secondaryLabel
+        navSubtitleLabel.numberOfLines = 1
+
+        navTitleStack.axis = .vertical
+        navTitleStack.alignment = .center
+        navTitleStack.spacing = 0
+        navTitleStack.addArrangedSubview(navTitleLabel)
+        navTitleStack.addArrangedSubview(navSubtitleLabel)
+        navigationItem.titleView = navTitleStack
+
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "StatusCell")
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 52
+        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+        tableView.tableFooterView = UIView()
+        view.addSubview(tableView)
+
+        diagnosticsStack.axis = .vertical
+        diagnosticsStack.spacing = 4
+        diagnosticsStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(diagnosticsStack)
+
+        [parseWarningsLabel, lastErrorLabel, lastEventLabel].forEach { label in
+            label.font = .preferredFont(forTextStyle: .caption2)
+            label.numberOfLines = 1
+            diagnosticsStack.addArrangedSubview(label)
+        }
+        parseWarningsLabel.textColor = .secondaryLabel
+        lastErrorLabel.textColor = .secondaryLabel
+        lastEventLabel.textColor = .tertiaryLabel
+
+        NSLayoutConstraint.activate([
+            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: diagnosticsStack.topAnchor, constant: -8),
+
+            diagnosticsStack.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+            diagnosticsStack.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+            diagnosticsStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6)
+        ])
     }
 
     private func bindStoreIfNeeded() {
@@ -350,34 +379,20 @@ final class ESMainViewController: UIViewController {
         }
     }
 
-    private func layoutSubviewsManually() {
-        let inset = view.layoutMargins
-        let top = view.safeAreaInsets.top + 16
-        let width = max(0, view.bounds.width - inset.left - inset.right)
-        let lineHeight: CGFloat = 22
-        let spacing: CGFloat = 8
-        let buttonHeight: CGFloat = 34
-
-        refreshButton.frame = CGRect(x: inset.left, y: top, width: 110, height: buttonHeight)
-
-        let labelsTop = top + buttonHeight + 18
-        for (index, label) in labels.enumerated() {
-            let y = labelsTop + CGFloat(index) * (lineHeight + spacing)
-            label.frame = CGRect(x: inset.left, y: y, width: width, height: lineHeight)
-        }
-    }
-
     private func renderSnapshot() {
-        nameLabel.text = snapshot.identity?.name ?? "No mug selected"
-        connectionLabel.text = "Connection: \(String(describing: snapshot.status.connectionState))"
-        liquidStateLabel.text = "Liquid state: \(formattedLiquidState(snapshot.status.liquidState))"
-        currentTempLabel.text = "Current temp: \(formattedTemperature(snapshot.status.currentTempC))"
-        targetTempLabel.text = "Target temp: \(formattedTemperature(snapshot.status.targetTempC))"
-        batteryLabel.text = "Battery: \(snapshot.status.batteryPercent.map { "\($0)%" } ?? "--")"
-        chargingLabel.text = "Charging: \(snapshot.status.isCharging.map { $0 ? "Yes" : "No" } ?? "--")"
-        warningLabel.text = "Parse warnings: \(snapshot.diagnostics.parseWarnings.count)"
+        navTitleLabel.text = snapshot.identity?.name ?? "No Mug Selected"
+        navSubtitleLabel.text = String(describing: snapshot.status.connectionState).capitalized
+        rows = [
+            DetailRow(title: "Liquid State", value: formattedLiquidState(snapshot.status.liquidState)),
+            DetailRow(title: "Current Temp", value: formattedTemperature(snapshot.status.currentTempC)),
+            DetailRow(title: "Target Temp", value: formattedTemperature(snapshot.status.targetTempC)),
+            DetailRow(title: "Battery", value: snapshot.status.batteryPercent.map { "\($0)%" } ?? "--"),
+            DetailRow(title: "Charging", value: snapshot.status.isCharging.map { $0 ? "Yes" : "No" } ?? "--")
+        ]
+        parseWarningsLabel.text = "Parse warnings: \(snapshot.diagnostics.parseWarnings.count)"
         lastErrorLabel.text = "Last error: \(lastErrorMessage ?? "--")"
         lastEventLabel.text = "Last event: \(snapshot.diagnostics.connectionEvents.last?.message ?? "--")"
+        tableView.reloadData()
     }
 
     private func formattedTemperature(_ value: Double?) -> String {
@@ -396,7 +411,34 @@ final class ESMainViewController: UIViewController {
     }
 }
 
+extension ESMainViewController: UITableViewDataSource, UITableViewDelegate {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        rows.count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "StatusCell", for: indexPath)
+        let row = rows[indexPath.row]
+
+        var config = UIListContentConfiguration.valueCell()
+        config.text = row.title
+        config.secondaryText = row.value
+        config.textProperties.color = .label
+        config.secondaryTextProperties.color = row.title == "Last Event" ? .tertiaryLabel : .secondaryLabel
+        config.secondaryTextProperties.numberOfLines = 0
+        cell.contentConfiguration = config
+        cell.selectionStyle = .none
+
+        return cell
+    }
+}
+
 final class ESConnectionViewController: UIViewController {
+    private struct DetailRow {
+        let title: String
+        let value: String
+    }
+
     private var store: ESAppSessionStore?
     private var observerToken: UUID?
 
@@ -411,29 +453,28 @@ final class ESConnectionViewController: UIViewController {
     private var lastErrorMessage: String?
     private var autoConnectEnabled = false
     private var preferredMugText = "None"
+    private var rows: [DetailRow] = []
 
-    private let selectedMugLabel = UILabel()
-    private let connectionLabel = UILabel()
-    private let discoveredLabel = UILabel()
-    private let preferredMugLabel = UILabel()
-    private let autoConnectLabel = UILabel()
     private let autoConnectSwitch = UISwitch()
-    private let lastErrorLabel = UILabel()
-    private let lastEventLabel = UILabel()
-
-    private let scanButton = UIButton(type: .system)
-    private let connectButton = UIButton(type: .system)
-    private let disconnectButton = UIButton(type: .system)
-
-    private lazy var labels: [UILabel] = [
-        selectedMugLabel,
-        connectionLabel,
-        discoveredLabel,
-        preferredMugLabel,
-        autoConnectLabel,
-        lastErrorLabel,
-        lastEventLabel
-    ]
+    private let tableView = UITableView(frame: .zero, style: .plain)
+    private lazy var scanBarButtonItem = UIBarButtonItem(
+        title: "Scan",
+        style: .plain,
+        target: self,
+        action: #selector(scanTapped)
+    )
+    private lazy var connectBarButtonItem = UIBarButtonItem(
+        title: "Connect",
+        style: .plain,
+        target: self,
+        action: #selector(connectTapped)
+    )
+    private lazy var disconnectBarButtonItem = UIBarButtonItem(
+        title: "Disconnect",
+        style: .plain,
+        target: self,
+        action: #selector(disconnectTapped)
+    )
 
     init(store: ESAppSessionStore) {
         self.store = store
@@ -452,36 +493,29 @@ final class ESConnectionViewController: UIViewController {
         bindStoreIfNeeded()
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        layoutSubviewsManually()
-    }
-
     private func configureUI() {
-        labels.forEach { label in
-            label.numberOfLines = 1
-            label.font = .preferredFont(forTextStyle: .body)
-            view.addSubview(label)
-        }
-        selectedMugLabel.font = .preferredFont(forTextStyle: .headline)
-        autoConnectLabel.text = "Auto-connect on launch"
-        lastErrorLabel.font = .preferredFont(forTextStyle: .caption1)
-        lastEventLabel.font = .preferredFont(forTextStyle: .caption1)
+        navigationItem.rightBarButtonItem = scanBarButtonItem
+        navigationItem.leftBarButtonItems = [connectBarButtonItem, disconnectBarButtonItem]
 
-        scanButton.setTitle("Scan", for: .normal)
-        scanButton.addTarget(self, action: #selector(scanTapped), for: .touchUpInside)
-        view.addSubview(scanButton)
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "ConnectionCell")
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 52
+        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+        tableView.tableFooterView = UIView()
+        view.addSubview(tableView)
 
-        connectButton.setTitle("Connect", for: .normal)
-        connectButton.addTarget(self, action: #selector(connectTapped), for: .touchUpInside)
-        view.addSubview(connectButton)
-
-        disconnectButton.setTitle("Disconnect", for: .normal)
-        disconnectButton.addTarget(self, action: #selector(disconnectTapped), for: .touchUpInside)
-        view.addSubview(disconnectButton)
-
+        autoConnectSwitch.onTintColor = .systemBlue
         autoConnectSwitch.addTarget(self, action: #selector(autoConnectToggled), for: .valueChanged)
-        view.addSubview(autoConnectSwitch)
+
+        NSLayoutConstraint.activate([
+            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
     }
 
     private func bindStoreIfNeeded() {
@@ -498,47 +532,24 @@ final class ESConnectionViewController: UIViewController {
         }
     }
 
-    private func layoutSubviewsManually() {
-        let inset = view.layoutMargins
-        let top = view.safeAreaInsets.top + 16
-        let width = max(0, view.bounds.width - inset.left - inset.right)
-        let lineHeight: CGFloat = 22
-        let spacing: CGFloat = 8
-        let buttonHeight: CGFloat = 34
-        let buttonWidth = min(110, (width - 16) / 3)
-
-        scanButton.frame = CGRect(x: inset.left, y: top, width: buttonWidth, height: buttonHeight)
-        connectButton.frame = CGRect(x: scanButton.frame.maxX + 8, y: top, width: buttonWidth, height: buttonHeight)
-        disconnectButton.frame = CGRect(x: connectButton.frame.maxX + 8, y: top, width: buttonWidth, height: buttonHeight)
-
-        let labelsTop = top + buttonHeight + 18
-        for (index, label) in labels.enumerated() {
-            let y = labelsTop + CGFloat(index) * (lineHeight + spacing)
-            label.frame = CGRect(x: inset.left, y: y, width: width, height: lineHeight)
-        }
-
-        autoConnectSwitch.frame = CGRect(
-            x: inset.left + width - autoConnectSwitch.intrinsicContentSize.width,
-            y: autoConnectLabel.frame.minY - 4,
-            width: autoConnectSwitch.intrinsicContentSize.width,
-            height: autoConnectSwitch.intrinsicContentSize.height
-        )
-    }
-
     private func renderState() {
-        selectedMugLabel.text = "Selected mug: \(snapshot.identity?.name ?? "None")"
-        connectionLabel.text = "Connection: \(String(describing: snapshot.status.connectionState))"
-        discoveredLabel.text = "Discovered mugs: \(discoveredMugs.count)"
-        preferredMugLabel.text = "Preferred mug: \(preferredMugText)"
-        lastErrorLabel.text = "Last error: \(lastErrorMessage ?? "--")"
-        lastEventLabel.text = "Last event: \(snapshot.diagnostics.connectionEvents.last?.message ?? "--")"
+        rows = [
+            DetailRow(title: "Selected Mug", value: snapshot.identity?.name ?? "None"),
+            DetailRow(title: "Connection", value: String(describing: snapshot.status.connectionState).capitalized),
+            DetailRow(title: "Discovered Mugs", value: "\(discoveredMugs.count)"),
+            DetailRow(title: "Preferred Mug", value: preferredMugText),
+            DetailRow(title: "Last Error", value: lastErrorMessage ?? "--"),
+            DetailRow(title: "Last Event", value: snapshot.diagnostics.connectionEvents.last?.message ?? "--")
+        ]
 
         autoConnectSwitch.isOn = autoConnectEnabled
         autoConnectSwitch.isEnabled = store?.canEnableAutoConnect() ?? false
+        tableView.reloadData()
 
-        scanButton.setTitle(isScanning ? "Scanning..." : "Scan", for: .normal)
-        scanButton.isEnabled = !isScanning
-        disconnectButton.isEnabled = snapshot.identity != nil
+        scanBarButtonItem.title = isScanning ? "Scanning..." : "Scan"
+        scanBarButtonItem.isEnabled = !isScanning
+        connectBarButtonItem.isEnabled = !discoveredMugs.isEmpty
+        disconnectBarButtonItem.isEnabled = snapshot.identity != nil
     }
 
     @objc
@@ -564,8 +575,7 @@ final class ESConnectionViewController: UIViewController {
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
 
         if let popover = sheet.popoverPresentationController {
-            popover.sourceView = connectButton
-            popover.sourceRect = connectButton.bounds
+            popover.barButtonItem = connectBarButtonItem
         }
 
         present(sheet, animated: true)
@@ -588,6 +598,37 @@ final class ESConnectionViewController: UIViewController {
         }
 
         store.setAutoConnectEnabled(autoConnectSwitch.isOn)
+    }
+}
+
+extension ESConnectionViewController: UITableViewDataSource, UITableViewDelegate {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        rows.count + 1
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "ConnectionCell", for: indexPath)
+        cell.selectionStyle = .none
+
+        if indexPath.row == 0 {
+            var config = UIListContentConfiguration.valueCell()
+            config.text = "Auto-connect on launch"
+            config.secondaryText = nil
+            cell.contentConfiguration = config
+            cell.accessoryView = autoConnectSwitch
+            return cell
+        }
+
+        let row = rows[indexPath.row - 1]
+        var config = UIListContentConfiguration.valueCell()
+        config.text = row.title
+        config.secondaryText = row.value
+        config.secondaryTextProperties.numberOfLines = 0
+        config.secondaryTextProperties.color = row.title == "Last Event" ? .tertiaryLabel : .secondaryLabel
+        cell.contentConfiguration = config
+        cell.accessoryView = nil
+
+        return cell
     }
 }
 
