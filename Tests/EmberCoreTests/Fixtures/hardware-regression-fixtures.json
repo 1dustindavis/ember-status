@@ -100,5 +100,107 @@
       "liquidStateRaw": 3,
       "targetTempC": 55
     }
+  },
+  {
+    "captureID": "hardware-2026-04-17-104442-heating-s01",
+    "notes": "not charging; at target",
+    "characteristics": {
+      "battery": "4600800C00",
+      "currentTemp": "7C15",
+      "liquidState": "05",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 70,
+      "currentTempC": 55,
+      "isCharging": false,
+      "liquidStateRaw": 5,
+      "targetTempC": 55
+    }
+  },
+  {
+    "captureID": "hardware-2026-04-17-104558-at-target-hold-s01",
+    "notes": "off charger; at target",
+    "characteristics": {
+      "battery": "4600E40C00",
+      "currentTemp": "7C15",
+      "liquidState": "06",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 70,
+      "currentTempC": 55,
+      "isCharging": false,
+      "liquidStateRaw": 6,
+      "targetTempC": 55
+    }
+  },
+  {
+    "captureID": "hardware-2026-04-17-104656-at-target-hold-s02",
+    "notes": "Captured state: at-target-hold.",
+    "characteristics": {
+      "battery": "4800480D00",
+      "currentTemp": "7C15",
+      "liquidState": "06",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 72,
+      "currentTempC": 55,
+      "isCharging": false,
+      "liquidStateRaw": 6,
+      "targetTempC": 55
+    }
+  },
+  {
+    "captureID": "hardware-2026-04-17-104526-at-target-hold-charging-s01",
+    "notes": "at target temp",
+    "characteristics": {
+      "battery": "47011C0C00",
+      "currentTemp": "7C15",
+      "liquidState": "06",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 71,
+      "currentTempC": 55,
+      "isCharging": true,
+      "liquidStateRaw": 6,
+      "targetTempC": 55
+    }
+  },
+  {
+    "captureID": "hardware-2026-04-17-104632-at-target-hold-charging-s02",
+    "notes": "Captured state: at-target-hold-charging.",
+    "characteristics": {
+      "battery": "4701E40C00",
+      "currentTemp": "7C15",
+      "liquidState": "06",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 71,
+      "currentTempC": 55,
+      "isCharging": true,
+      "liquidStateRaw": 6,
+      "targetTempC": 55
+    }
+  },
+  {
+    "captureID": "hardware-2026-04-17-104341-heating-s02",
+    "notes": "Captured state: heating.",
+    "characteristics": {
+      "battery": "4800800C00",
+      "currentTemp": "1815",
+      "liquidState": "05",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 72,
+      "currentTempC": 54,
+      "isCharging": false,
+      "liquidStateRaw": 5,
+      "targetTempC": 55
+    }
   }
 ]

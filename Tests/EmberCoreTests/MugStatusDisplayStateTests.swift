@@ -7,6 +7,7 @@ final class LiquidStateDisplayNameTests: XCTestCase {
         XCTAssertEqual(LiquidState.filling.displayName, "Filling")
         XCTAssertEqual(LiquidState.cooling.displayName, "Cooling")
         XCTAssertEqual(LiquidState.heating.displayName, "Heating")
+        XCTAssertEqual(LiquidState.atTargetHold.displayName, "At Target")
     }
 
     func testDisplayNameForUnknownState() {
