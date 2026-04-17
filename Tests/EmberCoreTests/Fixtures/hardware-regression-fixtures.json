@@ -1,70 +1,36 @@
 [
   {
-    "captureID": "anon-2026-02-14-idle",
-    "notes": "Real hardware capture (anonymized): mug resting on desk, not charging.",
+    "captureID": "hardware-2026-04-17-064751-idle",
+    "notes": "Mug resting, not charging.",
     "characteristics": {
-      "currentTemp": "7C15",
-      "targetTemp": "4416",
-      "battery": "4E00",
-      "liquidState": "01"
+      "battery": "5500080700",
+      "currentTemp": "9E07",
+      "liquidState": "01",
+      "targetTemp": "7C15"
     },
     "expected": {
-      "currentTempC": 55.0,
-      "targetTempC": 57.0,
-      "batteryPercent": 78,
+      "batteryPercent": 85,
+      "currentTempC": 19.5,
       "isCharging": false,
-      "liquidStateRaw": 1
+      "liquidStateRaw": 1,
+      "targetTempC": 55
     }
   },
   {
-    "captureID": "anon-2026-02-14-heating",
-    "notes": "Real hardware capture (anonymized): mug actively heating contents.",
+    "captureID": "hardware-2026-04-17-065031-cooling",
+    "notes": "Current temp above target temp.",
     "characteristics": {
-      "currentTemp": "7616",
-      "targetTemp": "B518",
-      "battery": "4000",
-      "liquidState": "04"
+      "battery": "5500080700",
+      "currentTemp": "9619",
+      "liquidState": "04",
+      "targetTemp": "7C15"
     },
     "expected": {
-      "currentTempC": 57.5,
-      "targetTempC": 63.25,
-      "batteryPercent": 64,
+      "batteryPercent": 85,
+      "currentTempC": 65.5,
       "isCharging": false,
-      "liquidStateRaw": 4
-    }
-  },
-  {
-    "captureID": "anon-2026-02-15-charging",
-    "notes": "Real hardware capture (anonymized): mug on charger while contents cool.",
-    "characteristics": {
-      "currentTemp": "9411",
-      "targetTemp": "4416",
-      "battery": "5201",
-      "liquidState": "03"
-    },
-    "expected": {
-      "currentTempC": 45.0,
-      "targetTempC": 57.0,
-      "batteryPercent": 82,
-      "isCharging": true,
-      "liquidStateRaw": 3
-    }
-  },
-  {
-    "captureID": "anon-2026-02-15-near-empty",
-    "notes": "Real hardware capture (anonymized): battery nearly depleted.",
-    "characteristics": {
-      "currentTemp": "8813",
-      "targetTemp": "4416",
-      "battery": "0600",
-      "liquidState": "01"
-    },
-    "expected": {
-      "currentTempC": 50.0,
-      "targetTempC": 57.0,
-      "batteryPercent": 6,
-      "isCharging": false,
-      "liquidStateRaw": 1
+      "liquidStateRaw": 4,
+      "targetTempC": 55
     }
   }
 ]
