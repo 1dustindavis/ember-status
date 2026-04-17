@@ -32,5 +32,22 @@
       "liquidStateRaw": 4,
       "targetTempC": 55
     }
+  },
+  {
+    "captureID": "hardware-2026-04-17-084738-low-battery-idle-s01",
+    "notes": "Captured state: low-battery-idle.",
+    "characteristics": {
+      "battery": "1000D00700",
+      "currentTemp": "3408",
+      "liquidState": "01",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 16,
+      "currentTempC": 21,
+      "isCharging": false,
+      "liquidStateRaw": 1,
+      "targetTempC": 55
+    }
   }
 ]
