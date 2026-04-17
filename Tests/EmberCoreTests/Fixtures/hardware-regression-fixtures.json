@@ -83,5 +83,22 @@
       "liquidStateRaw": 1,
       "targetTempC": 55
     }
+  },
+  {
+    "captureID": "hardware-2026-04-17-090213-cooling-s01",
+    "notes": "added liquid below the target. battery is low, and the app says \"cooling\"",
+    "characteristics": {
+      "battery": "1000D00700",
+      "currentTemp": "480D",
+      "liquidState": "03",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 16,
+      "currentTempC": 34,
+      "isCharging": false,
+      "liquidStateRaw": 3,
+      "targetTempC": 55
+    }
   }
 ]
