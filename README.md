@@ -1,21 +1,56 @@
 # Ember Status (Read-Only)
 
-UI Style guide: UIKit, no SwiftUI, no autolayout, no NIBs, with Mac Catalyst support.
-Minimum OS support: iOS 26.0 and macOS 26.0.
+Read-only Ember mug status client with a reusable core library (`EmberCore`) and a UIKit app (`Apps/EmberStatusApp`) for iOS + Mac Catalyst.
 
-Current implementation status for the read-only Ember status architecture described in `plan.md`:
+Minimum platform targets:
+- iOS 26.0
+- macOS 26.0 (via Mac Catalyst and SwiftPM platform support)
 
-- `EmberCore` domain models for identity + status.
-- Defensive parse-only protocol decoders.
-- Event-driven status reducer that supports partial updates.
-- BLE transport abstractions for scan/connect/read/notify without write APIs.
-- Read-only session coordinator use case for scan ranking, connect, capability discovery, refresh, notifications, reconnect, and explicit connection-event listener lifecycle controls.
-- Diagnostics model with protocol compatibility mode (`strict` / `permissive`) and connection event tracking.
-- Single UIKit app target (`Apps/EmberStatusApp`) with Mac Catalyst support, wired to coordinator snapshots and listener lifecycle hooks.
-- Unit + integration tests for parsing, reducer behavior, strict/permissive warning behavior across refresh cycles, use-case workflows, and read-only guardrails.
+## Screenshot
 
-## Run checks
+![Status tab screenshot](screenshot.png)
+
+## Current Repo State
+
+### Core package (`EmberCore`)
+- Domain models for mug identity, status, and diagnostics.
+- Defensive protocol parsers for read-only payload decoding.
+- Event-driven reducer for partial status updates.
+- Bluetooth abstractions and CoreBluetooth implementation for scan/connect/read/notify.
+- `MugSessionCoordinator` for session orchestration (scan ranking, connect/disconnect, refresh, capability discovery, listener lifecycle, reconnect behavior).
+
+### App (`Apps/EmberStatusApp`)
+- UIKit-only app.
+- iOS tab UI with `Status` and `Connection`.
+- Mac Catalyst split UI with sidebar navigation between `Status` and `Connection`.
+- Status screen uses nav-title mug/connection display, a continuous telemetry table, and a bottom diagnostics strip.
+- Connection screen uses a continuous details table, auto-connect switch row, and standard nav bar actions (`Scan`, `Connect`, `Disconnect`).
+- Shared app session store wires coordinator snapshots into UI state and persists preferred auto-connect settings.
+
+### Tests
+- Unit and integration tests cover status parsing, reducer behavior/display state, read-only guardrails, and session coordinator workflows.
+
+## Repository Layout
+
+- `Sources/EmberCore/Domain` — core models
+- `Sources/EmberCore/Protocol` — status parsing
+- `Sources/EmberCore/State` — reducer/state updates
+- `Sources/EmberCore/Bluetooth` — BLE abstractions + CoreBluetooth manager
+- `Sources/EmberCore/UseCases` — `MugSessionCoordinator`
+- `Sources/EmberCore/Diagnostics` — diagnostics + connection event metadata
+- `Apps/EmberStatusApp` — UIKit iOS/Mac Catalyst app target
+- `Tests/EmberCoreTests` — unit + integration tests
+
+## Validate
+
+Run package tests:
 
 ```bash
 swift test
+```
+
+Build the app target:
+
+```bash
+xcodebuild -project Apps/EmberStatusApp/EmberStatusApp.xcodeproj -scheme EmberStatusApp -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
