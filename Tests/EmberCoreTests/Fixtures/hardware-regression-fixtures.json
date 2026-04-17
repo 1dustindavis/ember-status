@@ -49,5 +49,39 @@
       "liquidStateRaw": 1,
       "targetTempC": 55
     }
+  },
+  {
+    "captureID": "hardware-2026-04-17-085429-low-battery-idle-s02",
+    "notes": "Captured state: low-battery-idle.",
+    "characteristics": {
+      "battery": "1000D00700",
+      "currentTemp": "3408",
+      "liquidState": "01",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 16,
+      "currentTempC": 21,
+      "isCharging": false,
+      "liquidStateRaw": 1,
+      "targetTempC": 55
+    }
+  },
+  {
+    "captureID": "hardware-2026-04-17-085835-low-battery-idle-s03",
+    "notes": "Captured state: low-battery-idle.",
+    "characteristics": {
+      "battery": "1000D00700",
+      "currentTemp": "6608",
+      "liquidState": "01",
+      "targetTemp": "7C15"
+    },
+    "expected": {
+      "batteryPercent": 16,
+      "currentTempC": 21.5,
+      "isCharging": false,
+      "liquidStateRaw": 1,
+      "targetTempC": 55
+    }
   }
 ]
