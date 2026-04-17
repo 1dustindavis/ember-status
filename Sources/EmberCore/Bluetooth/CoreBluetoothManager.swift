@@ -350,12 +350,10 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
 
     fileprivate func logNotice(_ message: String) {
         logger.notice("\(message)")
-        NSLog("%@", message)
     }
 
     fileprivate func logError(_ message: String) {
         logger.error("\(message)")
-        NSLog("%@", message)
     }
 
     fileprivate static func map(state: CBManagerState) -> BLEAvailability {

@@ -385,12 +385,10 @@ public final class MugSessionCoordinator {
 
     private func logNotice(_ message: String) {
         logger.notice("\(message)")
-        NSLog("%@", message)
     }
 
     private func logError(_ message: String) {
         logger.error("\(message)")
-        NSLog("%@", message)
     }
 }
 
