@@ -32,10 +32,10 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
     fileprivate let queue = DispatchQueue(label: "ember.core.bluetooth")
     fileprivate let central: CBCentralManager
     fileprivate let delegateProxy: DelegateProxy
-    fileprivate var connectContinuations: [UUID: CheckedContinuation<Void, Error>] = [:]
+    fileprivate var connectContinuations: [UUID: [CheckedContinuation<Void, Error>]] = [:]
     fileprivate var connectTimeoutTasks: [UUID: Task<Void, Never>] = [:]
-    fileprivate var capabilitiesContinuations: [UUID: CheckedContinuation<MugCapabilityMap, Error>] = [:]
-    fileprivate var readContinuations: [ReadRequestKey: CheckedContinuation<Data, Error>] = [:]
+    fileprivate var capabilitiesContinuations: [UUID: [CheckedContinuation<MugCapabilityMap, Error>]] = [:]
+    fileprivate var readContinuations: [ReadRequestKey: [CheckedContinuation<Data, Error>]] = [:]
     fileprivate var discoveredDevices: [UUID: BLEDevice] = [:]
     fileprivate var peripheralsByID: [UUID: CBPeripheral] = [:]
     fileprivate var characteristicsByPeripheral: [UUID: [BLECharacteristicID: CBCharacteristic]] = [:]
@@ -103,6 +103,12 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
+                if self.peripheralsByID[deviceID] == nil,
+                   let resolved = self.central.retrievePeripherals(withIdentifiers: [deviceID]).first {
+                    self.peripheralsByID[deviceID] = resolved
+                    self.logNotice("BLE connect resolved peripheral from identifier cache id=\(deviceID.uuidString)")
+                }
+
                 guard let peripheral = self.peripheralsByID[deviceID] else {
                     self.logError("BLE connect failed missing peripheral id=\(deviceID.uuidString)")
                     continuation.resume(throwing: CoreBluetoothManagerError.peripheralNotFound(deviceID))
@@ -114,7 +120,17 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
                     continuation.resume()
                     return
                 }
-                self.connectContinuations[deviceID] = continuation
+
+                var waiters = self.connectContinuations[deviceID] ?? []
+                waiters.append(continuation)
+                self.connectContinuations[deviceID] = waiters
+
+                // A connection is already in progress for this peripheral.
+                // Coalesce callers and let the existing attempt resolve everyone.
+                if waiters.count > 1 || peripheral.state == .connecting {
+                    return
+                }
+
                 self.startConnectTimeout(for: deviceID)
                 self.central.connect(peripheral, options: nil)
             }
@@ -147,7 +163,17 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
                 self.notifiableByPeripheral[deviceID] = []
                 self.characteristicsByPeripheral[deviceID] = [:]
                 self.pendingServiceDiscoveryCount[deviceID] = 0
-                self.capabilitiesContinuations[deviceID] = continuation
+
+                var waiters = self.capabilitiesContinuations[deviceID] ?? []
+                waiters.append(continuation)
+                self.capabilitiesContinuations[deviceID] = waiters
+
+                // If discovery is already in progress, coalesce callers and
+                // let the in-flight discovery complete all waiting continuations.
+                if waiters.count > 1 {
+                    return
+                }
+
                 peripheral.discoverServices(nil)
             }
         }
@@ -172,7 +198,16 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
                     continuation.resume(throwing: CoreBluetoothManagerError.characteristicNotFound(characteristic))
                     return
                 }
-                self.readContinuations[ReadRequestKey(deviceID: deviceID, characteristic: characteristic)] = continuation
+                let key = ReadRequestKey(deviceID: deviceID, characteristic: characteristic)
+                var waiters = self.readContinuations[key] ?? []
+                waiters.append(continuation)
+                self.readContinuations[key] = waiters
+
+                // A read is already in flight for this characteristic on this device.
+                // Coalesce callers and fan out the same value/error when it returns.
+                if waiters.count > 1 {
+                    return
+                }
                 peripheral.readValue(for: cbCharacteristic)
             }
         }
@@ -259,12 +294,21 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
         logNotice("BLE disconnect cleanup id=\(deviceID.uuidString)")
         clearConnectTimeout(for: deviceID)
 
-        connectContinuations.removeValue(forKey: deviceID)?.resume(throwing: disconnectionError)
-        capabilitiesContinuations.removeValue(forKey: deviceID)?.resume(throwing: disconnectionError)
+        let pendingConnectContinuations = connectContinuations.removeValue(forKey: deviceID) ?? []
+        for continuation in pendingConnectContinuations {
+            continuation.resume(throwing: disconnectionError)
+        }
+        let pendingCapabilityContinuations = capabilitiesContinuations.removeValue(forKey: deviceID) ?? []
+        for continuation in pendingCapabilityContinuations {
+            continuation.resume(throwing: disconnectionError)
+        }
 
         let pendingReadKeys = readContinuations.keys.filter { $0.deviceID == deviceID }
         for key in pendingReadKeys {
-            readContinuations.removeValue(forKey: key)?.resume(throwing: disconnectionError)
+            let continuations = readContinuations.removeValue(forKey: key) ?? []
+            for continuation in continuations {
+                continuation.resume(throwing: disconnectionError)
+            }
         }
 
         let pendingSubscriptionKeys = subscriptionContinuations.keys.filter { $0.deviceID == deviceID }
@@ -285,13 +329,16 @@ public final class CoreBluetoothManager: NSObject, BluetoothManaging {
             try? await Task.sleep(nanoseconds: 12_000_000_000)
             guard let self else { return }
             self.queue.async {
-                guard let continuation = self.connectContinuations.removeValue(forKey: deviceID) else { return }
+                let continuations = self.connectContinuations.removeValue(forKey: deviceID) ?? []
+                guard !continuations.isEmpty else { return }
                 self.clearConnectTimeout(for: deviceID)
                 self.logError("BLE connect timed out id=\(deviceID.uuidString)")
                 if let peripheral = self.peripheralsByID[deviceID] {
                     self.central.cancelPeripheralConnection(peripheral)
                 }
-                continuation.resume(throwing: CoreBluetoothManagerError.connectTimedOut(deviceID))
+                for continuation in continuations {
+                    continuation.resume(throwing: CoreBluetoothManagerError.connectTimedOut(deviceID))
+                }
                 self.eventContinuation?.yield(.connectionFailed(deviceID, message: "Connection timed out"))
             }
         }
@@ -401,7 +448,10 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
         let id = peripheral.identifier
         owner.clearConnectTimeout(for: id)
         owner.logNotice("BLE connected id=\(id.uuidString)")
-        owner.connectContinuations.removeValue(forKey: id)?.resume()
+        let continuations = owner.connectContinuations.removeValue(forKey: id) ?? []
+        for continuation in continuations {
+            continuation.resume()
+        }
         owner.eventContinuation?.yield(.connected(id))
     }
 
@@ -411,7 +461,11 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
         owner.clearConnectTimeout(for: id)
         let message = error?.localizedDescription ?? "Failed to connect"
         owner.logError("BLE failed to connect id=\(id.uuidString) error=\(message)")
-        owner.connectContinuations.removeValue(forKey: id)?.resume(throwing: error ?? CoreBluetoothManagerError.peripheralNotFound(id))
+        let continuations = owner.connectContinuations.removeValue(forKey: id) ?? []
+        let resolvedError = error ?? CoreBluetoothManagerError.peripheralNotFound(id)
+        for continuation in continuations {
+            continuation.resume(throwing: resolvedError)
+        }
         owner.eventContinuation?.yield(.connectionFailed(id, message: message))
     }
 
@@ -429,7 +483,10 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
         let id = peripheral.identifier
         if let error {
             owner.logError("BLE discover services failed id=\(id.uuidString) error=\(error.localizedDescription)")
-            owner.capabilitiesContinuations.removeValue(forKey: id)?.resume(throwing: error)
+            let continuations = owner.capabilitiesContinuations.removeValue(forKey: id) ?? []
+            for continuation in continuations {
+                continuation.resume(throwing: error)
+            }
             return
         }
 
@@ -438,7 +495,10 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
         owner.logNotice("BLE services discovered id=\(id.uuidString) count=\(services.count)")
         if services.isEmpty {
             let capability = MugCapabilityMap(readable: [], notifiable: [])
-            owner.capabilitiesContinuations.removeValue(forKey: id)?.resume(returning: capability)
+            let continuations = owner.capabilitiesContinuations.removeValue(forKey: id) ?? []
+            for continuation in continuations {
+                continuation.resume(returning: capability)
+            }
             return
         }
 
@@ -453,7 +513,10 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
 
         if let error {
             owner.logError("BLE discover characteristics failed id=\(id.uuidString) error=\(error.localizedDescription)")
-            owner.capabilitiesContinuations.removeValue(forKey: id)?.resume(throwing: error)
+            let continuations = owner.capabilitiesContinuations.removeValue(forKey: id) ?? []
+            for continuation in continuations {
+                continuation.resume(throwing: error)
+            }
             return
         }
 
@@ -484,7 +547,10 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
         if remaining == 0 {
             let map = MugCapabilityMap(readable: readable, notifiable: notifiable)
             owner.logNotice("BLE capabilities ready id=\(id.uuidString) readable=\(readable.count) notify=\(notifiable.count)")
-            owner.capabilitiesContinuations.removeValue(forKey: id)?.resume(returning: map)
+            let continuations = owner.capabilitiesContinuations.removeValue(forKey: id) ?? []
+            for continuation in continuations {
+                continuation.resume(returning: map)
+            }
         }
     }
 
@@ -495,7 +561,10 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
 
         if let error {
             owner.logError("BLE value update failed id=\(id.uuidString) characteristic=\(characteristicID.uuid) error=\(error.localizedDescription)")
-            owner.readContinuations.removeValue(forKey: ReadRequestKey(deviceID: id, characteristic: characteristicID))?.resume(throwing: error)
+            let readContinuations = owner.readContinuations.removeValue(forKey: ReadRequestKey(deviceID: id, characteristic: characteristicID)) ?? []
+            for continuation in readContinuations {
+                continuation.resume(throwing: error)
+            }
             owner.subscriptionContinuations[SubscriptionKey(deviceID: id, characteristic: characteristicID)]?.finish(throwing: error)
             owner.subscriptionContinuations.removeValue(forKey: SubscriptionKey(deviceID: id, characteristic: characteristicID))
             return
@@ -503,7 +572,10 @@ fileprivate final class DelegateProxy: NSObject, CBCentralManagerDelegate, CBPer
 
         let value = characteristic.value ?? Data()
         owner.logger.debug("BLE value update id=\(id.uuidString) characteristic=\(characteristicID.uuid) bytes=\(value.count)")
-        owner.readContinuations.removeValue(forKey: ReadRequestKey(deviceID: id, characteristic: characteristicID))?.resume(returning: value)
+        let readContinuations = owner.readContinuations.removeValue(forKey: ReadRequestKey(deviceID: id, characteristic: characteristicID)) ?? []
+        for continuation in readContinuations {
+            continuation.resume(returning: value)
+        }
         owner.subscriptionContinuations[SubscriptionKey(deviceID: id, characteristic: characteristicID)]?.yield(value)
     }
 }
