@@ -36,4 +36,17 @@ final class StatusParsersTests: XCTestCase {
 
         XCTAssertEqual(try? result.get(), .unknown(200))
     }
+
+    func testLiquidStateParserTreatsOneAsEmptyIdle() {
+        let data = Data([1])
+        let result = StatusParsers.parseLiquidState(from: data)
+
+        XCTAssertEqual(try? result.get(), .empty)
+    }
+
+    func testLiquidStateParserMapsKnownShiftedStates() {
+        XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([2])).get(), .filling)
+        XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([3])).get(), .cooling)
+        XCTAssertEqual(try? StatusParsers.parseLiquidState(from: Data([4])).get(), .heating)
+    }
 }

@@ -10,7 +10,13 @@ class ESSceneDelegate: UIResponder, UIWindowSceneDelegate {
 		window = UIWindow(windowScene: windowScene)
 		
 		if let window = window {
-			window.rootViewController = UINavigationController(rootViewController: ESMainViewController())
+			let store = ESAppSessionStore()
+
+#if targetEnvironment(macCatalyst)
+			window.rootViewController = ESCatalystSplitViewController(store: store)
+#else
+			window.rootViewController = ESTabBarController(store: store)
+#endif
 			
 #if targetEnvironment(macCatalyst)
 			

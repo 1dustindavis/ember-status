@@ -11,7 +11,7 @@ final class MugStatusReducerTests: XCTestCase {
             currentTempData: Data([0x10, 0x27]), // 100.00C
             targetTempData: Data([0x2C, 0x1E]), // 77.24C
             batteryData: Data([88, 0]),
-            liquidStateData: Data([3]),
+            liquidStateData: Data([4]),
             timestamp: now
         )
 
